@@ -46,10 +46,12 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		fmt.Println("Received: ", string(msg))
-		_, err = conn.Write([]byte("+PONG\r\n"))
-		if err != nil {
-			fmt.Println("Error writing to connection: ", err.Error())
-			return
+		if msg == "PING\n" {
+			_, err = conn.Write([]byte("+PONG\r\n"))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				return
+			}
 		}
 	}
 }
