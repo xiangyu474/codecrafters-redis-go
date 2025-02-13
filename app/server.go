@@ -22,10 +22,10 @@ func main() {
 	}
 	fmt.Println("Listening on 6379")
 
-	// conn, err := l.Accept()
+	conn, err := l.Accept()
 	for {
 		// ⚠️ 每次循环都 `Accept()` 一个新的连接，避免死循环
-		conn, err := l.Accept()
+		// conn, err := l.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
@@ -46,12 +46,10 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		fmt.Println("Received: ", string(msg))
-		if msg == "PING\n" {
-			_, err = conn.Write([]byte("+PONG\r\n"))
-			if err != nil {
-				fmt.Println("Error writing to connection: ", err.Error())
-				return
-			}
+		_, err = conn.Write([]byte("+PONG\r\n"))
+		if err != nil {
+			fmt.Println("Error writing to connection: ", err.Error())
+			return
 		}
 	}
 }
