@@ -40,11 +40,12 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	for {
-		_, err := reader.ReadString('\n')
+		msg, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Println("Error reading from connection: ", err.Error())
 			return
 		}
+		fmt.Println("Received: ", string(msg))
 		_, err = conn.Write([]byte("+PONG\r\n"))
 		if err != nil {
 			fmt.Println("Error writing to connection: ", err.Error())
