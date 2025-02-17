@@ -7,10 +7,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
+type entry struct {
+	value      string
+	expiration int64
+}
+
 var (
-	kvStore = make(map[string]string)
+	kvStore = make(map[string]entry)
 	mu      sync.Mutex
 )
 
@@ -127,14 +133,27 @@ func handleConnection(connection net.Conn) {
 		case "ECHO":
 			connection.Write([]byte("+" + messages[1] + "\r\n"))
 		case "SET":
-			if len(messages) != 3 {
+			if len(messages) < 3 {
 				connection.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
 				break
 			}
 			key := messages[1]
 			value := messages[2]
+			expiryTime := int64(0)
+			if len(messages) > 3 && strings.ToUpper(messages[3]) == "PX" {
+				if len(messages) != 5 {
+					connection.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
+					break
+				}
+				expiry, err := strconv.Atoi(messages[4])
+				if err != nil {
+					connection.Write([]byte("-ERR invalid expiry time\r\n"))
+					break
+				}
+				expiryTime = time.Now().UnixMilli() + int64(expiry)
+			}
 			mu.Lock()
-			kvStore[key] = value
+			kvStore[key] = entry{value: value, expiration: expiryTime}
 			mu.Unlock()
 			connection.Write([]byte("+OK\r\n"))
 		case "GET":
@@ -144,12 +163,16 @@ func handleConnection(connection net.Conn) {
 			}
 			key := messages[1]
 			mu.Lock()
-			value, ok := kvStore[key]
+			entry, ok := kvStore[key]
+			if ok && entry.expiration > 0 && entry.expiration < time.Now().UnixMilli() {
+				delete(kvStore, key)
+				ok = false
+			}
 			mu.Unlock()
 			if !ok {
 				connection.Write([]byte("$-1\r\n"))
 			} else {
-				connection.Write([]byte("$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"))
+				connection.Write([]byte("$" + strconv.Itoa(len(entry.value)) + "\r\n" + entry.value + "\r\n"))
 			}
 		default:
 		}
