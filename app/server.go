@@ -6,6 +6,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+)
+
+var (
+	kvStore = make(map[string]string)
+	mu      sync.Mutex
 )
 
 func main() {
@@ -120,6 +126,31 @@ func handleConnection(connection net.Conn) {
 			connection.Write([]byte("+OK\r\n"))
 		case "ECHO":
 			connection.Write([]byte("+" + messages[1] + "\r\n"))
+		case "SET":
+			if len(messages) != 3 {
+				connection.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
+				break
+			}
+			key := messages[1]
+			value := messages[2]
+			mu.Lock()
+			kvStore[key] = value
+			mu.Unlock()
+			connection.Write([]byte("+OK\r\n"))
+		case "GET":
+			if len(messages) != 2 {
+				connection.Write([]byte("-ERR wrong number of arguments for 'get' command\r\n"))
+				continue
+			}
+			key := messages[1]
+			mu.Lock()
+			value, ok := kvStore[key]
+			mu.Unlock()
+			if !ok {
+				connection.Write([]byte("$-1\r\n"))
+			} else {
+				connection.Write([]byte("$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"))
+			}
 		default:
 		}
 	}
