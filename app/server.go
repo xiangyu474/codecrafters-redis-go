@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +29,63 @@ func main() {
 	}
 }
 
+// parseRESP parses Redis Serialization Protocol (RESP) formatted byte data into string commands.
+// It supports RESP Arrays of Bulk Strings format only.
+//
+// The function takes a byte slice containing RESP formatted data and returns:
+// - []string: A slice containing the parsed commands
+// - error: An error if the parsing fails due to invalid format
+//
+// Format expected:
+// *<number of arguments>\r\n
+// $<number of bytes of argument 1>\r\n
+// <argument data>\r\n
+// ...
+//
+// Example input:
+// "*2\r\n$4\r\nECHO\r\n$5\r\nhello\r\n"
+// Returns: ["ECHO", "hello"], nil
+func parseRESP(data []byte) ([]string, error) {
+
+	tokens := strings.Split(strings.TrimSpace(string(data)), "\r\n")
+	var commands []string
+	i := 0
+	for i < len(tokens) {
+		if tokens[i] == "" {
+			i++
+			continue
+		}
+		switch tokens[i][0] {
+		case '*':
+			// string to int
+			arrayLen, err := strconv.Atoi(tokens[i][1:])
+			if err != nil {
+				return nil, err
+			}
+			i++
+			commands = make([]string, 0, arrayLen)
+			for j := 0; j < arrayLen; j++ {
+				if i >= len(tokens) || tokens[i][0] != '$' {
+					return nil, fmt.Errorf("invalid bulk string header")
+				}
+				strLen, err := strconv.Atoi(tokens[i][1:])
+				if err != nil {
+					return nil, err
+				}
+				i++
+				if i >= len(tokens) || len(tokens[i]) != strLen {
+					return nil, fmt.Errorf("invalid string length")
+				}
+				commands = append(commands, tokens[i])
+				i++
+			}
+		default:
+			return nil, fmt.Errorf("unsupported RESP type: %s", tokens[i])
+		}
+	}
+	return commands, nil
+}
+
 func handleConnection(connection net.Conn) {
 	defer connection.Close()
 	// 创建一个大小为1024字节的缓冲区（buffer），用于临时存储从连接中读取的数据。
@@ -48,16 +106,22 @@ func handleConnection(connection net.Conn) {
 			break
 		}
 		// 将缓冲区中的数据转换为字符串，并根据换行符分割成多个消息。
-		messages := strings.Split(string(buf), "\r\n")
+		// messages := strings.Split(string(buf), "\r\n")
+		messages, err := parseRESP(buf[:dataLength])
+		if err != nil {
+			fmt.Println("Error parsing RESP:", err.Error())
+			break
+		}
 		fmt.Println("Received messages:", messages)
-		connection.Write([]byte("+PONG\r\n"))
-		// for _, message := range messages {
-		// 	switch message {
-		// 	case "PING":
-		// 		connection.Write([]byte("+PONG\r\n"))
-		// 	default:
-		// 	}
-		// }
+		switch strings.ToUpper(messages[0]) {
+		case "PING":
+			connection.Write([]byte("+PONG\r\n"))
+		case "COMMAND":
+			connection.Write([]byte("+OK\r\n"))
+		case "ECHO":
+			connection.Write([]byte("+" + messages[1] + "\r\n"))
+		default:
+		}
 	}
 }
 
