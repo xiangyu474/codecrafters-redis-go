@@ -20,6 +20,11 @@ var (
 	mu      sync.Mutex
 )
 
+type client struct {
+	inTransaction bool
+	commandQueue  []string
+}
+
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
@@ -102,6 +107,8 @@ func handleConnection(connection net.Conn) {
 	defer connection.Close()
 	// 创建一个大小为1024字节的缓冲区（buffer），用于临时存储从连接中读取的数据。
 	buf := make([]byte, 1024)
+	// 用于存储客户端的状态，包括是否在事务中以及事务中的命令队列。
+	clientState := client{inTransaction: false, commandQueue: make([]string, 0)}
 	for {
 		// 从连接中读取数据，存储到缓冲区中，并返回读取的字节数。
 		dataLength, err := connection.Read(buf)
@@ -124,7 +131,13 @@ func handleConnection(connection net.Conn) {
 			fmt.Println("Error parsing RESP:", err.Error())
 			break
 		}
+		if clientState.inTransaction {
+			clientState.commandQueue = append(clientState.commandQueue, strings.Join(messages, " "))
+			connection.Write([]byte("+QUEUED\r\n"))
+			continue
+		}
 		fmt.Println("Received messages:", messages)
+
 		switch strings.ToUpper(messages[0]) {
 		case "PING":
 			connection.Write([]byte("+PONG\r\n"))
@@ -201,6 +214,10 @@ func handleConnection(connection net.Conn) {
 			// connection.Write([]byte(":" + entry_val.value + "\r\n"))
 			// Error: Bad integer value
 			connection.Write([]byte(":" + kvStore[key].value + "\r\n"))
+		case "MULTI":
+			clientState.inTransaction = true
+			connection.Write([]byte("+OK\r\n"))
+
 		default:
 		}
 	}
