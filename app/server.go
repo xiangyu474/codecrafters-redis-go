@@ -190,7 +190,6 @@ func handleConnection(connection net.Conn) {
 				value, err := strconv.Atoi(entry_val.value)
 				if err != nil {
 					connection.Write([]byte("-ERR value is not an integer or out of range\r\n"))
-					mu.Unlock()
 					continue
 				}
 				entry_val.value = strconv.Itoa(1 + value)
@@ -199,7 +198,9 @@ func handleConnection(connection net.Conn) {
 				kvStore[key] = entry{value: "1", expiration: int64(0)}
 			}
 			mu.Unlock()
-			connection.Write([]byte(":" + entry_val.value + "\r\n"))
+			// connection.Write([]byte(":" + entry_val.value + "\r\n"))
+			// Error: Bad integer value
+			connection.Write([]byte(":" + kvStore[key].value + "\r\n"))
 		default:
 		}
 	}
