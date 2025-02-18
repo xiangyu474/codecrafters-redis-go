@@ -197,11 +197,7 @@ func handleConnection(connection net.Conn) {
 				kvStore[key] = entry{value: "1", expiration: int64(0)}
 			}
 			mu.Unlock()
-			if !ok {
-				connection.Write([]byte(":1\r\n"))
-			} else {
-				connection.Write([]byte(":" + entry_val.value + "\r\n"))
-			}
+			connection.Write([]byte(":" + entry_val.value + "\r\n"))
 		default:
 		}
 	}
