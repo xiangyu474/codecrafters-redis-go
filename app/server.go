@@ -181,24 +181,26 @@ func handleConnection(connection net.Conn) {
 			}
 			key := messages[1]
 			mu.Lock()
-			entry, ok := kvStore[key]
-			if ok && entry.expiration > 0 && entry.expiration < time.Now().UnixMilli() {
+			entry_val, ok := kvStore[key]
+			if ok && entry_val.expiration > 0 && entry_val.expiration < time.Now().UnixMilli() {
 				delete(kvStore, key)
 				ok = false
 			}
 			if ok {
-				value, err := strconv.Atoi(entry.value)
+				value, err := strconv.Atoi(entry_val.value)
 				if err != nil {
 					connection.Write([]byte("-ERR value is not an integer or out of range\r\n"))
 				}
-				entry.value = strconv.Itoa(1 + value)
-				kvStore[key] = entry
+				entry_val.value = strconv.Itoa(1 + value)
+				kvStore[key] = entry_val
+			} else {
+				kvStore[key] = entry{value: "1", expiration: int64(0)}
 			}
 			mu.Unlock()
 			if !ok {
 				connection.Write([]byte(":1\r\n"))
 			} else {
-				connection.Write([]byte(":" + entry.value + "\r\n"))
+				connection.Write([]byte(":" + entry_val.value + "\r\n"))
 			}
 		default:
 		}
