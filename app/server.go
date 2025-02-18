@@ -217,7 +217,11 @@ func handleConnection(connection net.Conn) {
 		case "MULTI":
 			clientState.inTransaction = true
 			connection.Write([]byte("+OK\r\n"))
-
+		case "EXEC":
+			if !clientState.inTransaction {
+				connection.Write([]byte("-ERR EXEC without MULTI\r\n"))
+				continue
+			}
 		default:
 		}
 	}
