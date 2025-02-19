@@ -131,8 +131,9 @@ func handleConnection(connection net.Conn) {
 			fmt.Println("Error parsing RESP:", err.Error())
 			break
 		}
-		if clientState.inTransaction {
+		if clientState.inTransaction && strings.ToUpper(messages[0]) != "EXEC" {
 			clientState.commandQueue = append(clientState.commandQueue, strings.Join(messages, " "))
+			fmt.Println("Queued messages:", clientState.commandQueue)
 			connection.Write([]byte("+QUEUED\r\n"))
 			continue
 		}
@@ -221,6 +222,10 @@ func handleConnection(connection net.Conn) {
 			if !clientState.inTransaction {
 				connection.Write([]byte("-ERR EXEC without MULTI\r\n"))
 				continue
+			} else {
+				clientState.inTransaction = false
+				// expecting "*0\r\n" as the response
+				connection.Write([]byte("*0\r\n"))
 			}
 		default:
 		}
