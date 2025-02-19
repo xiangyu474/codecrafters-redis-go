@@ -168,7 +168,7 @@ func processCommand(messages []string) CommandResult {
 		if ok {
 			value, err := strconv.Atoi(entry_val.value)
 			if err != nil {
-				return CommandResult{Type: "-", Value: "ERR value is not an integer"}
+				return CommandResult{Type: "-", Value: "ERR value is not an integer or out of range"}
 			}
 			entry_val.value = strconv.Itoa(1 + value)
 			kvStore[key] = entry_val
