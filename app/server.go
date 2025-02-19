@@ -20,9 +20,13 @@ var (
 	mu      sync.Mutex
 )
 
+type CommandResult struct {
+	Type  string // 响应类型：Simple String(+), Error(-), Integer(:), Bulk String($)
+	Value string
+}
 type client struct {
 	inTransaction bool
-	commandQueue  []string
+	commandQueue  [][]string
 }
 
 func main() {
@@ -46,22 +50,6 @@ func main() {
 	}
 }
 
-// parseRESP parses Redis Serialization Protocol (RESP) formatted byte data into string commands.
-// It supports RESP Arrays of Bulk Strings format only.
-//
-// The function takes a byte slice containing RESP formatted data and returns:
-// - []string: A slice containing the parsed commands
-// - error: An error if the parsing fails due to invalid format
-//
-// Format expected:
-// *<number of arguments>\r\n
-// $<number of bytes of argument 1>\r\n
-// <argument data>\r\n
-// ...
-//
-// Example input:
-// "*2\r\n$4\r\nECHO\r\n$5\r\nhello\r\n"
-// Returns: ["ECHO", "hello"], nil
 func parseRESP(data []byte) ([]string, error) {
 
 	tokens := strings.Split(strings.TrimSpace(string(data)), "\r\n")
@@ -103,12 +91,116 @@ func parseRESP(data []byte) ([]string, error) {
 	return commands, nil
 }
 
+func writeRESP(connection net.Conn, result CommandResult) {
+	switch result.Type {
+	case "+", "-", ":":
+		connection.Write([]byte(result.Type + result.Value + "\r\n"))
+	case "$":
+		if result.Value == "" {
+			connection.Write([]byte("$-1\r\n"))
+		} else {
+			// Bulk Strings
+			connection.Write([]byte("$" + strconv.Itoa(len(result.Value)) + "\r\n" + result.Value + "\r\n"))
+		}
+	}
+}
+
+func processCommand(messages []string) CommandResult {
+	switch strings.ToUpper(messages[0]) {
+	case "PING":
+		return CommandResult{Type: "+", Value: "PONG"}
+	case "COMMAND":
+		return CommandResult{Type: "+", Value: "OK"}
+	case "ECHO":
+		return CommandResult{Type: "+", Value: messages[1]}
+	case "SET":
+		if len(messages) < 3 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'set' command"}
+		}
+		key := messages[1]
+		value := messages[2]
+		expiryTime := int64(0)
+		if len(messages) > 3 && strings.ToUpper(messages[3]) == "PX" {
+			if len(messages) != 5 {
+				return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'set' command"}
+			}
+			expiry, err := strconv.Atoi(messages[4])
+			if err != nil {
+				return CommandResult{Type: "-", Value: "ERR invalid expiry time"}
+			}
+			expiryTime = time.Now().UnixMilli() + int64(expiry)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		kvStore[key] = entry{value: value, expiration: expiryTime}
+		// mu.Unlock()
+		return CommandResult{Type: "+", Value: "OK"}
+	case "GET":
+		if len(messages) != 2 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'get' command"}
+		}
+		key := messages[1]
+		mu.Lock()
+		entry, ok := kvStore[key]
+		if ok && entry.expiration > 0 && entry.expiration < time.Now().UnixMilli() {
+			delete(kvStore, key)
+			ok = false
+		}
+		mu.Unlock()
+		if !ok {
+			return CommandResult{Type: "$", Value: ""}
+		} else {
+			return CommandResult{Type: "$", Value: entry.value}
+		}
+	case "INCR":
+		if len(messages) != 2 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'incr' command"}
+		}
+		key := messages[1]
+		mu.Lock()
+		defer mu.Unlock()
+
+		entry_val, ok := kvStore[key]
+		if ok && entry_val.expiration > 0 && entry_val.expiration < time.Now().UnixMilli() {
+			delete(kvStore, key)
+			ok = false
+		}
+		if ok {
+			value, err := strconv.Atoi(entry_val.value)
+			if err != nil {
+				return CommandResult{Type: "-", Value: "ERR value is not an integer"}
+			}
+			entry_val.value = strconv.Itoa(1 + value)
+			kvStore[key] = entry_val
+		} else {
+			kvStore[key] = entry{value: "1", expiration: int64(0)}
+		}
+		return CommandResult{Type: ":", Value: kvStore[key].value}
+	}
+	return CommandResult{Type: "-", Value: "ERR unknown command"}
+}
+
+func executeQueuedCommands(clientState *client, connection net.Conn) {
+	// 写入数组长度
+	connection.Write([]byte("*" + strconv.Itoa(len(clientState.commandQueue)) + "\r\n"))
+
+	// 执行所有队列中的命令并收集结果
+	for _, cmd := range clientState.commandQueue {
+		result := processCommand(cmd)
+		writeRESP(connection, result)
+	}
+}
+
 func handleConnection(connection net.Conn) {
 	defer connection.Close()
 	// 创建一个大小为1024字节的缓冲区（buffer），用于临时存储从连接中读取的数据。
 	buf := make([]byte, 1024)
 	// 用于存储客户端的状态，包括是否在事务中以及事务中的命令队列。
-	clientState := client{inTransaction: false, commandQueue: make([]string, 0)}
+	clientState := client{
+		inTransaction: false,
+		commandQueue:  make([][]string, 0),
+	}
+
 	for {
 		// 从连接中读取数据，存储到缓冲区中，并返回读取的字节数。
 		dataLength, err := connection.Read(buf)
@@ -132,103 +224,35 @@ func handleConnection(connection net.Conn) {
 			break
 		}
 		if clientState.inTransaction && strings.ToUpper(messages[0]) != "EXEC" {
-			clientState.commandQueue = append(clientState.commandQueue, strings.Join(messages, " "))
+			clientState.commandQueue = append(clientState.commandQueue, messages)
 			fmt.Println("Queued messages:", clientState.commandQueue)
-			connection.Write([]byte("+QUEUED\r\n"))
+			// connection.Write([]byte("+QUEUED\r\n"))
+			writeRESP(connection, CommandResult{Type: "+", Value: "QUEUED"})
 			continue
 		}
 		fmt.Println("Received messages:", messages)
-
-		switch strings.ToUpper(messages[0]) {
-		case "PING":
-			connection.Write([]byte("+PONG\r\n"))
-		case "COMMAND":
-			connection.Write([]byte("+OK\r\n"))
-		case "ECHO":
-			connection.Write([]byte("+" + messages[1] + "\r\n"))
-		case "SET":
-			if len(messages) < 3 {
-				connection.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
-				break
-			}
-			key := messages[1]
-			value := messages[2]
-			expiryTime := int64(0)
-			if len(messages) > 3 && strings.ToUpper(messages[3]) == "PX" {
-				if len(messages) != 5 {
-					connection.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
-					break
-				}
-				expiry, err := strconv.Atoi(messages[4])
-				if err != nil {
-					connection.Write([]byte("-ERR invalid expiry time\r\n"))
-					break
-				}
-				expiryTime = time.Now().UnixMilli() + int64(expiry)
-			}
-			mu.Lock()
-			kvStore[key] = entry{value: value, expiration: expiryTime}
-			mu.Unlock()
-			connection.Write([]byte("+OK\r\n"))
-		case "GET":
-			if len(messages) != 2 {
-				connection.Write([]byte("-ERR wrong number of arguments for 'get' command\r\n"))
-				continue
-			}
-			key := messages[1]
-			mu.Lock()
-			entry, ok := kvStore[key]
-			if ok && entry.expiration > 0 && entry.expiration < time.Now().UnixMilli() {
-				delete(kvStore, key)
-				ok = false
-			}
-			mu.Unlock()
-			if !ok {
-				connection.Write([]byte("$-1\r\n"))
+		if strings.ToUpper(messages[0]) == "MULTI" {
+			if clientState.inTransaction {
+				writeRESP(connection, CommandResult{Type: "-", Value: "ERR MULTI calls can not be nested"})
 			} else {
-				connection.Write([]byte("$" + strconv.Itoa(len(entry.value)) + "\r\n" + entry.value + "\r\n"))
+				clientState.inTransaction = true
+				writeRESP(connection, CommandResult{Type: "+", Value: "OK"})
 			}
-		case "INCR":
-			if len(messages) != 2 {
-				connection.Write([]byte("-ERR wrong number of arguments for 'incr' command\r\n"))
-				continue
-			}
-			key := messages[1]
-			mu.Lock()
-			entry_val, ok := kvStore[key]
-			if ok && entry_val.expiration > 0 && entry_val.expiration < time.Now().UnixMilli() {
-				delete(kvStore, key)
-				ok = false
-			}
-			if ok {
-				value, err := strconv.Atoi(entry_val.value)
-				if err != nil {
-					connection.Write([]byte("-ERR value is not an integer or out of range\r\n"))
-					continue
-				}
-				entry_val.value = strconv.Itoa(1 + value)
-				kvStore[key] = entry_val
-			} else {
-				kvStore[key] = entry{value: "1", expiration: int64(0)}
-			}
-			mu.Unlock()
-			// connection.Write([]byte(":" + entry_val.value + "\r\n"))
-			// Error: Bad integer value
-			connection.Write([]byte(":" + kvStore[key].value + "\r\n"))
-		case "MULTI":
-			clientState.inTransaction = true
-			connection.Write([]byte("+OK\r\n"))
-		case "EXEC":
-			if !clientState.inTransaction {
-				connection.Write([]byte("-ERR EXEC without MULTI\r\n"))
-				continue
-			} else {
-				clientState.inTransaction = false
-				// expecting "*0\r\n" as the response
-				connection.Write([]byte("*0\r\n"))
-			}
-		default:
+			continue
 		}
+		if strings.ToUpper(messages[0]) == "EXEC" {
+			if !clientState.inTransaction {
+				writeRESP(connection, CommandResult{Type: "-", Value: "ERR EXEC without MULTI"})
+			} else {
+				executeQueuedCommands(&clientState, connection)
+				clientState.inTransaction = false
+				clientState.commandQueue = make([][]string, 0)
+			}
+			continue
+		}
+
+		result := processCommand(messages)
+		writeRESP(connection, result)
 	}
 }
 
