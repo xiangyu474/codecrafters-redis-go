@@ -208,22 +208,28 @@ func handleConnection(connection net.Conn) {
 			if err.Error() == "EOF" {
 				fmt.Println("Connection closed")
 				break
+			} else {
+				fmt.Println("Error reading:", err.Error())
+				break
 			}
-			fmt.Println("Error reading:", err.Error())
-			break
 		}
-		if dataLength == 0 {
-			fmt.Println("No data read")
-			break
-		}
+		// 在 Redis CLI 中直接按回车不会触发这个错误，因为 Redis CLI 是一个高级客户端，它会过滤掉空输入。
+		// 实际上，这段代码中检查 dataLength == 0 可能是多余的，因为：
+		// TCP 连接中读取到 0 字节通常意味着连接已经关闭
+		// 上面的 err 检查已经能处理连接关闭的情况（EOF）
+		// if dataLength == 0 {
+		// 	fmt.Println("No data read")
+		// 	break
+		// }
 		// 将缓冲区中的数据转换为字符串，并根据换行符分割成多个消息。
 		// messages := strings.Split(string(buf), "\r\n")
 		messages, err := parseRESP(buf[:dataLength])
 		if err != nil {
-			fmt.Println("Error parsing RESP:", err.Error())
-			break
+			// fmt.Println("Error parsing RESP:", err.Error())
+			writeRESP(connection, CommandResult{Type: "-", Value: "ERR " + err.Error()})
+			continue
 		}
-		if clientState.inTransaction && strings.ToUpper(messages[0]) != "EXEC" {
+		if clientState.inTransaction && strings.ToUpper(messages[0]) != "EXEC" && strings.ToUpper(messages[0]) != "DISCARD" {
 			clientState.commandQueue = append(clientState.commandQueue, messages)
 			fmt.Println("Queued messages:", clientState.commandQueue)
 			// connection.Write([]byte("+QUEUED\r\n"))
@@ -251,6 +257,16 @@ func handleConnection(connection net.Conn) {
 			continue
 		}
 
+		if strings.ToUpper(messages[0]) == "DISCARD" {
+			if !clientState.inTransaction {
+				writeRESP(connection, CommandResult{Type: "-", Value: "ERR DISCARD without MULTI"})
+			} else {
+				clientState.inTransaction = false
+				clientState.commandQueue = make([][]string, 0)
+				writeRESP(connection, CommandResult{Type: "+", Value: "OK"})
+			}
+			continue
+		}
 		result := processCommand(messages)
 		writeRESP(connection, result)
 	}

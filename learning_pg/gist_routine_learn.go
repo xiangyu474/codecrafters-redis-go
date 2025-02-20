@@ -1,3 +1,5 @@
+// https://antonz.org/go-concurrency/goroutines/
+
 package main
 
 import (
