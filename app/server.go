@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -15,9 +16,18 @@ type entry struct {
 	expiration int64
 }
 
+type config struct {
+	dir        string
+	dbfilename string
+}
+
 var (
 	kvStore = make(map[string]entry)
 	mu      sync.Mutex
+	cfg     = config{
+		dir:        "/tmp",
+		dbfilename: "dump.rdb",
+	}
 )
 
 type CommandResult struct {
@@ -32,6 +42,20 @@ type client struct {
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
+
+	// 1. Parse command line arguments
+	dir := flag.String("dir", "/tmp", "Redis data directory")
+	dbfilename := flag.String("dbfilename", "dump.rdb", "Redis data file name")
+	flag.Parse()
+	// 2. Set the data directory and file name in the config struct
+	if *dir != "" {
+		cfg.dir = *dir
+	}
+	if *dbfilename != "" {
+		cfg.dbfilename = *dbfilename
+	}
+	fmt.Printf("dir: %s, dbfilename: %s\r\n", cfg.dir, cfg.dbfilename)
+
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -102,11 +126,35 @@ func writeRESP(connection net.Conn, result CommandResult) {
 			// Bulk Strings
 			connection.Write([]byte("$" + strconv.Itoa(len(result.Value)) + "\r\n" + result.Value + "\r\n"))
 		}
+	case "*":
+		connection.Write([]byte("*" + result.Value))
 	}
 }
 
 func processCommand(messages []string) CommandResult {
 	switch strings.ToUpper(messages[0]) {
+	case "CONFIG":
+		if len(messages) < 2 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'config' command"}
+		}
+		if strings.ToUpper(messages[1]) == "GET" {
+			if len(messages) != 3 {
+				return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'config get' command"}
+			}
+			switch strings.ToUpper(messages[2]) {
+			case "DIR":
+				return CommandResult{
+					Type:  "*",
+					Value: fmt.Sprintf("2\r\n$3\r\ndir\r\n$%d\r\n%s\r\n", len(cfg.dir), cfg.dir),
+				}
+			case "DBFILENAME":
+				return CommandResult{
+					Type:  "*",
+					Value: fmt.Sprintf("2\r\n$10\r\ndbfilename\r\n$%d\r\n%s\r\n", len(cfg.dbfilename), cfg.dbfilename),
+				}
+			default:
+			}
+		}
 	case "PING":
 		return CommandResult{Type: "+", Value: "PONG"}
 	case "COMMAND":
