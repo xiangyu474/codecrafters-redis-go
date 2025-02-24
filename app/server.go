@@ -358,53 +358,6 @@ func readStringEncoded(reader *bufio.Reader) (string, error) {
 	return string(data), nil
 }
 
-// func readSizeEncoded(reader *bufio.Reader) (int, error) {
-// 	firstByte, err := reader.ReadByte()
-// 	if err != nil {
-// 		return 0, err
-// 	}
-
-// 	fmt.Printf("First byte: 0x%X\n", firstByte) // 输出调试信息
-
-// 	// 00xxxxxx: 6-bit integer (value = firstByte)
-// 	if firstByte>>6 == 0 {
-// 		return int(firstByte), nil
-// 	}
-
-// 	// 01xxxxxx: 14-bit integer (value in next byte)
-// 	if firstByte>>6 == 1 {
-// 		secondByte, err := reader.ReadByte()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-// 		// firstByte & 0x3F 这部分的作用是保留 firstByte 的低 6 位，去掉高 2 位。
-// 		// 左移 8 位（<< 8）表示把 firstByte & 0x3F 这个数值扩大 256 倍，相当于把它放到高 8 位。
-// 		// | 按位或 运算是把 secondByte 拼接到右边，这样就形成一个完整的 14-bit 数值
-// 		return int(firstByte&0x3F)<<8 | int(secondByte), nil
-// 	}
-
-// 	// 10000000: 32-bit integer (value in next 4 bytes)
-// 	if firstByte>>6 == 2 {
-// 		var data uint32
-// 		err := binary.Read(reader, binary.BigEndian, &data)
-// 		if err != nil {
-// 			return 0, err
-// 		}
-// 		return int(data), nil
-// 	}
-
-// 	// 遇到 `11xxxxxx` 的情况，读取额外字节
-// 	if firstByte>>6 == 3 {
-// 		secondByte, err := reader.ReadByte()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-// 		fmt.Printf("Unexpected encoding: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
-// 	}
-
-// 	return 0, fmt.Errorf("unknown encoding format")
-// }
-
 func readSizeEncoded(reader *bufio.Reader) (int, error) {
 	firstByte, err := reader.ReadByte()
 	if err != nil {
@@ -424,10 +377,13 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		// firstByte & 0x3F 这部分的作用是保留 firstByte 的低 6 位，去掉高 2 位。
+		// 左移 8 位（<< 8）表示把 firstByte & 0x3F 这个数值扩大 256 倍，相当于把它放到高 8 位。
+		// | 按位或 运算是把 secondByte 拼接到右边，这样就形成一个完整的 14-bit 数值
 		return int(firstByte&0x3F)<<8 | int(secondByte), nil
 	}
 
-	if firstByte == 0x80 {
+	if firstByte>>6 == 2 {
 		fmt.Printf("firstByte == 0x80")
 		var data uint32
 		err := binary.Read(reader, binary.BigEndian, &data)
@@ -470,34 +426,50 @@ func loadRDBFile() error {
 	if err != nil {
 		return fmt.Errorf("failed to read RDB header: %w", err)
 	}
+
 	for {
 		b, err := reader.ReadByte()
-		fmt.Printf("b: 0x%X\n", b)
 		if err != nil {
 			return fmt.Errorf("failed to read next byte: %w", err)
 		}
+		fmt.Printf("b: 0x%X\n", b)
+
+		if b == 0xFA {
+			meta, err := readStringEncoded(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read metadata: %w", err)
+			}
+			fmt.Printf("Skipping metadata: %s\n", meta)
+			continue
+		}
+
 		if b == 0xFE {
 			dbIndex, err := readSizeEncoded(reader)
 			if err != nil {
 				return fmt.Errorf("failed to read db index: %w", err)
 			}
 			fmt.Printf("Loading data for DB %d\n", dbIndex)
-		} else if b == 0xFF {
-			break
-		} else {
-			// 读取key-value对
-			key, err := readStringEncoded(reader)
-			if err != nil {
-				return fmt.Errorf("failed to read key: %w", err)
-			}
-			value, err := readStringEncoded(reader)
-			if err != nil {
-				return fmt.Errorf("failed to read value: %w", err)
-			}
-			mu.Lock()
-			kvStore[key] = entry{value: value, expiration: 0}
-			mu.Unlock()
+			continue
 		}
+
+		if b == 0xFF {
+			break
+		}
+
+		// 解析 Key-Value 对
+		reader.UnreadByte() // 关键：如果不是特殊 opcode，回退字节以正确读取 key
+		key, err := readStringEncoded(reader)
+		if err != nil {
+			return fmt.Errorf("failed to read key: %w", err)
+		}
+		value, err := readStringEncoded(reader)
+		if err != nil {
+			return fmt.Errorf("failed to read value: %w", err)
+		}
+
+		mu.Lock()
+		kvStore[key] = entry{value: value, expiration: 0}
+		mu.Unlock()
 	}
 	return nil
 }
