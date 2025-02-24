@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +61,12 @@ func main() {
 	}
 	fmt.Printf("dir: %s, dbfilename: %s\r\n", cfg.dir, cfg.dbfilename)
 
+	// 3. Load the RDB file
+	err := loadRDBFile()
+	if err != nil {
+		fmt.Println("Failed to load RDB file:", err)
+		os.Exit(1)
+	}
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -154,6 +165,20 @@ func processCommand(messages []string) CommandResult {
 				}
 			default:
 			}
+		}
+	case "KEYS":
+		if len(messages) != 2 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'keys' command"}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		resp := fmt.Sprintf("%d\r\n", len(kvStore))
+		for key := range kvStore {
+			resp += fmt.Sprintf("$%d\r\n%s\r\n", len(key), key)
+		}
+		return CommandResult{
+			Type:  "*",
+			Value: resp,
 		}
 	case "PING":
 		return CommandResult{Type: "+", Value: "PONG"}
@@ -320,4 +345,161 @@ func handleConnection(connection net.Conn) {
 	}
 }
 
+func readStringEncoded(reader *bufio.Reader) (string, error) {
+	length, err := readSizeEncoded(reader)
+	if err != nil {
+		return "", err
+	}
+	data := make([]byte, length)
+	_, err = io.ReadFull(reader, data)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// func readSizeEncoded(reader *bufio.Reader) (int, error) {
+// 	firstByte, err := reader.ReadByte()
+// 	if err != nil {
+// 		return 0, err
+// 	}
+
+// 	fmt.Printf("First byte: 0x%X\n", firstByte) // 输出调试信息
+
+// 	// 00xxxxxx: 6-bit integer (value = firstByte)
+// 	if firstByte>>6 == 0 {
+// 		return int(firstByte), nil
+// 	}
+
+// 	// 01xxxxxx: 14-bit integer (value in next byte)
+// 	if firstByte>>6 == 1 {
+// 		secondByte, err := reader.ReadByte()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 		// firstByte & 0x3F 这部分的作用是保留 firstByte 的低 6 位，去掉高 2 位。
+// 		// 左移 8 位（<< 8）表示把 firstByte & 0x3F 这个数值扩大 256 倍，相当于把它放到高 8 位。
+// 		// | 按位或 运算是把 secondByte 拼接到右边，这样就形成一个完整的 14-bit 数值
+// 		return int(firstByte&0x3F)<<8 | int(secondByte), nil
+// 	}
+
+// 	// 10000000: 32-bit integer (value in next 4 bytes)
+// 	if firstByte>>6 == 2 {
+// 		var data uint32
+// 		err := binary.Read(reader, binary.BigEndian, &data)
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 		return int(data), nil
+// 	}
+
+// 	// 遇到 `11xxxxxx` 的情况，读取额外字节
+// 	if firstByte>>6 == 3 {
+// 		secondByte, err := reader.ReadByte()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 		fmt.Printf("Unexpected encoding: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
+// 	}
+
+// 	return 0, fmt.Errorf("unknown encoding format")
+// }
+
+func readSizeEncoded(reader *bufio.Reader) (int, error) {
+	firstByte, err := reader.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+
+	fmt.Printf("First byte: 0x%X\n", firstByte) // 调试信息
+
+	if firstByte>>6 == 0 {
+		return int(firstByte), nil
+	}
+
+	if firstByte>>6 == 1 {
+		secondByte, err := reader.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		return int(firstByte&0x3F)<<8 | int(secondByte), nil
+	}
+
+	if firstByte == 0x80 {
+		var data uint32
+		err := binary.Read(reader, binary.BigEndian, &data)
+		if err != nil {
+			return 0, err
+		}
+		return int(data), nil
+	}
+
+	// 处理 LZF 压缩格式
+	if firstByte>>6 == 3 { // 11000000 (0xC0) 代表 LZF 压缩
+		secondByte, err := reader.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+
+		fmt.Printf("LZF encoded data: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
+
+		// 这里你需要读取并解码 LZF 压缩数据
+		return 0, fmt.Errorf("LZF compression not implemented yet")
+	}
+
+	return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
+}
+
+func loadRDBFile() error {
+	filePath := filepath.Join(cfg.dir, cfg.dbfilename)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("RDB file does not exist, starting with empty database")
+			return nil
+		}
+		return fmt.Errorf("failed to read RDB file: %w", err)
+	}
+
+	// 将字节切片转换为带有缓冲功能的 bufio.Reader，以便使用 readStringEncoded 和 readSizeEncoded 函数读取数据。
+	reader := bufio.NewReader(bytes.NewReader(data))
+
+	header := make([]byte, 9)
+	_, err = io.ReadFull(reader, header)
+	if err != nil {
+		return fmt.Errorf("failed to read RDB header: %w", err)
+	}
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return fmt.Errorf("failed to read next byte: %w", err)
+		}
+		if b == 0xFE {
+			dbIndex, err := readSizeEncoded(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read db index: %w", err)
+			}
+			fmt.Printf("Loading data for DB %d\n", dbIndex)
+		} else if b == 0xFF {
+			break
+		} else {
+			// 读取key-value对
+			key, err := readStringEncoded(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read key: %w", err)
+			}
+			value, err := readStringEncoded(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read value: %w", err)
+			}
+			mu.Lock()
+			kvStore[key] = entry{value: value, expiration: 0}
+			mu.Unlock()
+		}
+	}
+	return nil
+}
+
 // docker run --rm -it redis redis-cli -h host.docker.internal -p 6379
+// data\dump.rdb
+// go run app/server.go --dir data --dbfilename dump.rdb
