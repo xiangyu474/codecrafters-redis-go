@@ -434,19 +434,6 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 		return int(data), nil
 	}
 
-	// // 处理 LZF 压缩格式
-	// if firstByte>>6 == 3 { // 11000000 (0xC0) 代表 LZF 压缩
-	// 	secondByte, err := reader.ReadByte()
-	// 	if err != nil {
-	// 		return 0, err
-	// 	}
-
-	// 	fmt.Printf("LZF encoded data: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
-
-	// 	// 这里你需要读取并解码 LZF 压缩数据
-	// 	return 0, fmt.Errorf("LZF compression not implemented yet")
-	// }
-
 	return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
 }
 
