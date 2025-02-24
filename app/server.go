@@ -393,16 +393,16 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 		return int(data), nil
 	}
 
-	// 11xxxxxx: 特殊编码格式
-	if firstByte>>6 == 3 {
-		fmt.Println("firstByte>>6 == 3")
-		secondByte, err := reader.ReadByte()
-		if err != nil {
-			return 0, err
-		}
-		fmt.Printf("Unexpected encoding: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
-		return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
-	}
+	// // 11xxxxxx: 特殊编码格式
+	// if firstByte>>6 == 3 {
+	// 	fmt.Println("firstByte>>6 == 3")
+	// 	secondByte, err := reader.ReadByte()
+	// 	if err != nil {
+	// 		return 0, err
+	// 	}
+	// 	fmt.Printf("Unexpected encoding: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
+	// 	return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
+	// }
 
 	return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
 }
@@ -452,12 +452,27 @@ func loadRDBFile() error {
 			// 如果是整数类型 (0xC0，0xC1等)
 			if firstByte>>6 == 3 {
 				fmt.Printf("Skipping non-string meta value for key: %s\n", metaKey)
-				// 跳过这个无效的元数据值
-				_, err := reader.ReadByte()
+				// // 跳过这个无效的元数据值
+				// _, err := reader.ReadByte()
+				// if err != nil {
+				// 	return fmt.Errorf("failed to skip non-string meta value: %w", err)
+				// }
+				// continue
+				var skipBytes int
+				switch firstByte {
+				case 0xC0:
+					skipBytes = 1
+				case 0xC1:
+					skipBytes = 2
+				case 0xC2:
+					skipBytes = 4
+				case 0xC3:
+					skipBytes = 8
+				}
+				_, err := reader.Discard(skipBytes)
 				if err != nil {
 					return fmt.Errorf("failed to skip non-string meta value: %w", err)
 				}
-				continue
 			} else {
 				// 回退一个字节，准备读取有效值
 				reader.UnreadByte()

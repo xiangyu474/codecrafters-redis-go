@@ -1,0 +1,17 @@
+52 45 44 49 53 30 30 31 32  // "REDIS0012" 文件头  
+FA 09 72 65 64 69 73 2D 76 65 72  // meta key: "redis-ver"  
+05 37 2E 34 2E 32  // meta value: "7.4.2"  
+FA 0A 72 65 64 69 73 2D 62 69 74 73  // meta key: "redis-bits"  
+C0 40  // "redis-bits" 的值，可能是 64（0x40）  
+FA 05 63 74 69 6D 65  // meta key: "ctime"  
+C2 3B 4A B8 67  // meta value，可能是时间戳  
+FA 08 75 73 65 64 2D 6D 65 6D  // meta key: "used-mem"  
+C2 68 8B 0F 00  // meta value，可能是已使用内存大小  
+FA 08 61 6F 66 2D 62 61 73 65  // meta key: "aof-base"  
+C0 00  // meta value，可能是 0  
+FE 00  // 数据库编号（DB 0）  
+FB 01 00 00  // 过期时间信息（可能表示数据不过期）  
+05 6D 79 6B 65 79  // key: "mykey"  
+05 6D 79 76 61 6C  // value: "myval"  
+FF  // RDB 文件结束标记  
+D1 75 59 84 F2 E8 FE E2  // 校验和（checksum）
