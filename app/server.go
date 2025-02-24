@@ -472,6 +472,7 @@ func loadRDBFile() error {
 	}
 	for {
 		b, err := reader.ReadByte()
+		fmt.Printf("b: 0x%X\n", b)
 		if err != nil {
 			return fmt.Errorf("failed to read next byte: %w", err)
 		}
