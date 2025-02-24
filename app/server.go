@@ -414,10 +414,12 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 	fmt.Printf("First byte: 0x%X\n", firstByte) // 调试信息
 
 	if firstByte>>6 == 0 {
+		fmt.Printf("firstByte>>6 == 0")
 		return int(firstByte), nil
 	}
 
 	if firstByte>>6 == 1 {
+		fmt.Printf("firstByte>>6 == 1")
 		secondByte, err := reader.ReadByte()
 		if err != nil {
 			return 0, err
@@ -426,12 +428,24 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 	}
 
 	if firstByte == 0x80 {
+		fmt.Printf("firstByte == 0x80")
 		var data uint32
 		err := binary.Read(reader, binary.BigEndian, &data)
 		if err != nil {
 			return 0, err
 		}
 		return int(data), nil
+	}
+
+	// 11xxxxxx: 特殊编码格式
+	if firstByte>>6 == 3 {
+		fmt.Println("firstByte>>6 == 3")
+		secondByte, err := reader.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		fmt.Printf("Unexpected encoding: firstByte=0x%X, secondByte=0x%X\n", firstByte, secondByte)
+		return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
 	}
 
 	return 0, fmt.Errorf("unknown encoding format: 0x%X", firstByte)
