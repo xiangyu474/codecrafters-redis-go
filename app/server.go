@@ -367,12 +367,12 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 	fmt.Printf("First byte: 0x%X\n", firstByte) // 调试信息
 
 	if firstByte>>6 == 0 {
-		fmt.Printf("firstByte>>6 == 0")
+		fmt.Println("firstByte>>6 == 0")
 		return int(firstByte), nil
 	}
 
 	if firstByte>>6 == 1 {
-		fmt.Printf("firstByte>>6 == 1")
+		fmt.Println("firstByte>>6 == 1")
 		secondByte, err := reader.ReadByte()
 		if err != nil {
 			return 0, err
@@ -426,6 +426,8 @@ func loadRDBFile() error {
 	if err != nil {
 		return fmt.Errorf("failed to read RDB header: %w", err)
 	}
+	// 打印解析出来的header redis
+	fmt.Printf("header: %s\n", header)
 
 	for {
 		b, err := reader.ReadByte()
@@ -433,13 +435,39 @@ func loadRDBFile() error {
 			return fmt.Errorf("failed to read next byte: %w", err)
 		}
 		fmt.Printf("b: 0x%X\n", b)
-
+		// 处理元数据部分（如版本信息等），应该跳过这些部分
 		if b == 0xFA {
-			meta, err := readStringEncoded(reader)
+			metaKey, err := readStringEncoded(reader) // 读取元数据 key
 			if err != nil {
-				return fmt.Errorf("failed to read metadata: %w", err)
+				return fmt.Errorf("failed to read meta key: %w", err)
 			}
-			fmt.Printf("Skipping metadata: %s\n", meta)
+			fmt.Printf("Meta key: %s\n", metaKey)
+
+			// 读取元数据 value 的第一个字节
+			firstByte, err := reader.ReadByte()
+			if err != nil {
+				return fmt.Errorf("failed to read next byte: %w", err)
+			}
+
+			// 如果是整数类型 (0xC0，0xC1等)
+			if firstByte>>6 == 3 {
+				fmt.Printf("Skipping non-string meta value for key: %s\n", metaKey)
+				// 跳过这个无效的元数据值
+				_, err := reader.ReadByte()
+				if err != nil {
+					return fmt.Errorf("failed to skip non-string meta value: %w", err)
+				}
+				continue
+			} else {
+				// 回退一个字节，准备读取有效值
+				reader.UnreadByte()
+
+				metaValue, err := readStringEncoded(reader) // 读取元数据 value
+				if err != nil {
+					return fmt.Errorf("failed to read meta value: %w", err)
+				}
+				fmt.Printf("Meta value: %s\n", metaValue)
+			}
 			continue
 		}
 
@@ -449,31 +477,42 @@ func loadRDBFile() error {
 				return fmt.Errorf("failed to read db index: %w", err)
 			}
 			fmt.Printf("Loading data for DB %d\n", dbIndex)
-			continue
-		}
 
-		if b == 0xFF {
+			// 跳过哈希表大小和过期键数量
+			_, err = readSizeEncoded(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read hash table size: %w", err)
+			}
+			_, err = readSizeEncoded(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read expire count: %w", err)
+			}
+		} else if b == 0xFF {
 			break
-		}
+		} else {
+			// 读取键值对
+			key, err := readStringEncoded(reader)
+			fmt.Printf("Key read: %s\n", key)
+			if err != nil {
+				return fmt.Errorf("failed to read key: %w", err)
+			}
 
-		// 解析 Key-Value 对
-		reader.UnreadByte() // 关键：如果不是特殊 opcode，回退字节以正确读取 key
-		key, err := readStringEncoded(reader)
-		if err != nil {
-			return fmt.Errorf("failed to read key: %w", err)
-		}
-		value, err := readStringEncoded(reader)
-		if err != nil {
-			return fmt.Errorf("failed to read value: %w", err)
-		}
+			value, err := readStringEncoded(reader)
+			fmt.Printf("Value read: %s\n", value)
+			if err != nil {
+				return fmt.Errorf("failed to read value: %w", err)
+			}
 
-		mu.Lock()
-		kvStore[key] = entry{value: value, expiration: 0}
-		mu.Unlock()
+			// 存储键值对
+			mu.Lock()
+			kvStore[key] = entry{value: value, expiration: 0}
+			mu.Unlock()
+
+		}
 	}
 	return nil
 }
 
 // docker run --rm -it redis redis-cli -h host.docker.internal -p 6379
 // data\dump.rdb
-// go run app/server.go --dir data --dbfilename dump.rdb
+// go run app/server.go --dir data --dbfilename dump.rdb;
