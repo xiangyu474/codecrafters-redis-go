@@ -479,13 +479,12 @@ func loadRDBFile() error {
 			fmt.Printf("Loading data for DB %d\n", dbIndex)
 
 			// 跳过哈希表大小和过期键数量
-			_, err = readSizeEncoded(reader)
-			if err != nil {
-				return fmt.Errorf("failed to read hash table size: %w", err)
-			}
-			_, err = readSizeEncoded(reader)
-			if err != nil {
-				return fmt.Errorf("failed to read expire count: %w", err)
+			nextByte, _ := reader.ReadByte()
+			if nextByte == 0xFB {
+				hashTablesize, _ := readSizeEncoded(reader)
+				fmt.Printf("Hash table size: %d\n", hashTablesize)
+				hashTableExpire, _ := readSizeEncoded(reader)
+				fmt.Printf("Hash table expire: %d\n", hashTableExpire)
 			}
 		} else if b == 0xFF {
 			break
