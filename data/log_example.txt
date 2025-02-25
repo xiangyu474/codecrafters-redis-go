@@ -1,0 +1,86 @@
+go run app/server.go --dir data --dbfilename dump.rdbZZ0DVN672\Desktop\projects\codecrafters-redis-go>
+Logs from your program will appear here!
+dir: data, dbfilename: dump.rdb
+header: REDIS0012
+b: 0xFA
+First byte: 0x9
+firstByte: 1001
+firstByte>>6 == 0
+Meta key: redis-ver
+First byte: 0x5
+firstByte: 101
+firstByte>>6 == 0
+Meta value: 7.4.2
+b: 0xFA
+First byte: 0xA
+firstByte: 1010
+firstByte>>6 == 0
+Meta key: redis-bits
+Skipping non-string meta value for key: redis-bits
+b: 0xFA
+First byte: 0x5
+firstByte: 101
+firstByte>>6 == 0
+Meta key: ctime
+Skipping non-string meta value for key: ctime
+b: 0xFA
+First byte: 0x8
+firstByte: 1000
+firstByte>>6 == 0
+Meta key: used-mem
+Skipping non-string meta value for key: used-mem
+b: 0xFA
+First byte: 0x8
+firstByte: 1000
+firstByte>>6 == 0
+Meta key: aof-base
+Skipping non-string meta value for key: aof-base
+b: 0xFE
+First byte: 0x0
+firstByte: 0
+firstByte>>6 == 0
+Loading data for DB 0
+First byte: 0x3
+firstByte: 11
+firstByte>>6 == 0
+Hash table size: 3
+First byte: 0x0
+firstByte: 0
+firstByte>>6 == 0
+Hash table expire: 0
+b: 0x0
+default: 0x0
+First byte: 0x4
+firstByte: 100
+firstByte>>6 == 0
+Key read: fuck
+First byte: 0xB
+firstByte: 1011
+firstByte>>6 == 0
+Value read: hello,world
+b: 0x0
+default: 0x0
+First byte: 0x5
+firstByte: 101
+firstByte>>6 == 0
+Key read: apple
+First byte: 0x5
+firstByte: 101
+firstByte>>6 == 0
+Value read: mango
+b: 0x0
+default: 0x0
+First byte: 0x7
+firstByte: 111
+firstByte>>6 == 0
+Key read: chinese
+#####这个0x40是十六进制表示的64!但10其实是前导位，表示占用两字节#####
+First byte: 0x40
+firstByte: 1000000
+firstByte>>6 == 1
+#####这个0x40是十六进制表示的65!,这个才是真实的SizedLength#####
+secondByte: 0x41
+secondByte: 1000001
+length:  65
+Value read: guoposhanhezaichengchuncaomushenganshihuajianleihenbieniaojingxin
+b: 0xFF

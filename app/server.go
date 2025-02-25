@@ -346,10 +346,48 @@ func handleConnection(connection net.Conn) {
 }
 
 func readStringEncoded(reader *bufio.Reader) (string, error) {
+	firstByte, err := reader.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	// 如果第一个字节的高 2 位是 11，表示这是一个特殊编码格式，可能是inter或者是LZF压缩格式。
+	if firstByte>>6 == 3 {
+		switch firstByte {
+		case 0xC0: // 8-bit整数
+			// 为什么这里不穿指针参数：因为这里只是读取一个字节，不需要修改传入变量的值。
+			b, err := reader.ReadByte()
+			if err != nil {
+				return "", err
+			}
+			return strconv.Itoa(int(int8(b))), nil
+		case 0xC1: // 16-bit整数
+			var val int16
+			// 为什么需要指针：binary.Read函数需要修改传入变量的值，所以需要接收指针参数
+			err := binary.Read(reader, binary.LittleEndian, &val)
+			if err != nil {
+				return "", err
+			}
+			return strconv.Itoa(int(val)), nil
+		case 0xC2: // 32-bit整数
+			var val int32
+			err := binary.Read(reader, binary.LittleEndian, &val)
+			if err != nil {
+				return "", err
+			}
+			return strconv.Itoa(int(val)), nil
+		case 0xC3: // LZF
+			// LZF 压缩格式，这里我们不支持，直接返回错误。
+			return "", fmt.Errorf("unsupported encoding format: 0x%X", firstByte)
+		}
+	}
+
+	// 普通字符串
+	reader.UnreadByte() // 把读出来的字节放回去，让readSizeEncoded重新读取
 	length, err := readSizeEncoded(reader)
 	if err != nil {
 		return "", err
 	}
+	fmt.Println("length: ", length)
 	data := make([]byte, length)
 	_, err = io.ReadFull(reader, data)
 	if err != nil {
@@ -379,6 +417,9 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 		// 01xxxxxx: 14-bit encoding
 		fmt.Println("firstByte>>6 == 1")
 		secondByte, err := reader.ReadByte()
+		fmt.Printf("secondByte: 0x%X\n", secondByte)
+		// 调试，打印原始数据
+		fmt.Printf("secondByte: %b\n", secondByte)
 		if err != nil {
 			return 0, err
 		}
@@ -399,7 +440,7 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 		return int(data), nil
 	}
 
-	// // 11xxxxxx: 特殊编码格式
+	// !!11xxxxxx: 特殊编码格式 - 这里应该由readStringEncoded处理
 	// if firstByte>>6 == 3 {
 	// 	fmt.Println("firstByte>>6 == 3")
 	// 	secondByte, err := reader.ReadByte()
@@ -451,36 +492,36 @@ func loadRDBFile() error {
 			}
 			fmt.Printf("Meta key: %s\n", metaKey)
 
-			firstByte, err := reader.ReadByte()
+			// firstByte, err := reader.ReadByte()
+			// if err != nil {
+			// 	return fmt.Errorf("failed to read next byte: %w", err)
+			// }
+			// // 如果是整数类型 (0xC0，0xC1等)
+			// if firstByte>>6 == 3 {
+			// 	fmt.Printf("Skipping non-string meta value for key: %s\n", metaKey)
+			// 	var skipBytes int
+			// 	switch firstByte {
+			// 	case 0xC0:
+			// 		skipBytes = 1
+			// 	case 0xC1:
+			// 		skipBytes = 2
+			// 	case 0xC2:
+			// 		skipBytes = 4
+			// 	case 0xC3:
+			// 		skipBytes = 8
+			// 	}
+			// 	_, err := reader.Discard(skipBytes)
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to skip non-string meta value: %w", err)
+			// 	}
+			// } else {
+			// 	reader.UnreadByte()
+			metaValue, err := readStringEncoded(reader)
 			if err != nil {
-				return fmt.Errorf("failed to read next byte: %w", err)
+				return fmt.Errorf("failed to read meta value: %w", err)
 			}
-			// 如果是整数类型 (0xC0，0xC1等)
-			if firstByte>>6 == 3 {
-				fmt.Printf("Skipping non-string meta value for key: %s\n", metaKey)
-				var skipBytes int
-				switch firstByte {
-				case 0xC0:
-					skipBytes = 1
-				case 0xC1:
-					skipBytes = 2
-				case 0xC2:
-					skipBytes = 4
-				case 0xC3:
-					skipBytes = 8
-				}
-				_, err := reader.Discard(skipBytes)
-				if err != nil {
-					return fmt.Errorf("failed to skip non-string meta value: %w", err)
-				}
-			} else {
-				reader.UnreadByte()
-				metaValue, err := readStringEncoded(reader)
-				if err != nil {
-					return fmt.Errorf("failed to read meta value: %w", err)
-				}
-				fmt.Printf("Meta value: %s\n", metaValue)
-			}
+			fmt.Printf("Meta value: %s\n", metaValue)
+			// }
 		case 0xFE:
 			dbIndex, err := readSizeEncoded(reader)
 			if err != nil {
