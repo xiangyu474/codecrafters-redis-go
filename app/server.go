@@ -365,13 +365,18 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 	}
 
 	fmt.Printf("First byte: 0x%X\n", firstByte) // 调试信息
+	// 调试，打印原始数据
+	fmt.Printf("firstByte: %b\n", firstByte)
 
 	if firstByte>>6 == 0 {
+		// 00xxxxxx: 6-bit encoding
+		// 如果第一个字节的高 2 位是 00，表示这是一个 6-bit 编码，直接返回这个数值即可。
 		fmt.Println("firstByte>>6 == 0")
 		return int(firstByte), nil
 	}
 
 	if firstByte>>6 == 1 {
+		// 01xxxxxx: 14-bit encoding
 		fmt.Println("firstByte>>6 == 1")
 		secondByte, err := reader.ReadByte()
 		if err != nil {
@@ -384,6 +389,7 @@ func readSizeEncoded(reader *bufio.Reader) (int, error) {
 	}
 
 	if firstByte>>6 == 2 {
+		// 10xxxxxx: 32-bit encoding
 		fmt.Printf("firstByte == 0x80")
 		var data uint32
 		err := binary.Read(reader, binary.BigEndian, &data)
@@ -429,35 +435,29 @@ func loadRDBFile() error {
 	// 打印解析出来的header redis
 	fmt.Printf("header: %s\n", header)
 
+	var expireTime int64 = 0 // 记录当前 key 的过期时间
+
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
 			return fmt.Errorf("failed to read next byte: %w", err)
 		}
 		fmt.Printf("b: 0x%X\n", b)
-		// 处理元数据部分（如版本信息等），应该跳过这些部分
-		if b == 0xFA {
-			metaKey, err := readStringEncoded(reader) // 读取元数据 key
+		switch b {
+		case 0xFA:
+			metaKey, err := readStringEncoded(reader)
 			if err != nil {
 				return fmt.Errorf("failed to read meta key: %w", err)
 			}
 			fmt.Printf("Meta key: %s\n", metaKey)
 
-			// 读取元数据 value 的第一个字节
 			firstByte, err := reader.ReadByte()
 			if err != nil {
 				return fmt.Errorf("failed to read next byte: %w", err)
 			}
-
 			// 如果是整数类型 (0xC0，0xC1等)
 			if firstByte>>6 == 3 {
 				fmt.Printf("Skipping non-string meta value for key: %s\n", metaKey)
-				// // 跳过这个无效的元数据值
-				// _, err := reader.ReadByte()
-				// if err != nil {
-				// 	return fmt.Errorf("failed to skip non-string meta value: %w", err)
-				// }
-				// continue
 				var skipBytes int
 				switch firstByte {
 				case 0xC0:
@@ -474,36 +474,48 @@ func loadRDBFile() error {
 					return fmt.Errorf("failed to skip non-string meta value: %w", err)
 				}
 			} else {
-				// 回退一个字节，准备读取有效值
 				reader.UnreadByte()
-
-				metaValue, err := readStringEncoded(reader) // 读取元数据 value
+				metaValue, err := readStringEncoded(reader)
 				if err != nil {
 					return fmt.Errorf("failed to read meta value: %w", err)
 				}
 				fmt.Printf("Meta value: %s\n", metaValue)
 			}
-			continue
-		}
-
-		if b == 0xFE {
+		case 0xFE:
 			dbIndex, err := readSizeEncoded(reader)
 			if err != nil {
 				return fmt.Errorf("failed to read db index: %w", err)
 			}
 			fmt.Printf("Loading data for DB %d\n", dbIndex)
-
-			// 跳过哈希表大小和过期键数量
 			nextByte, _ := reader.ReadByte()
 			if nextByte == 0xFB {
 				hashTablesize, _ := readSizeEncoded(reader)
 				fmt.Printf("Hash table size: %d\n", hashTablesize)
 				hashTableExpire, _ := readSizeEncoded(reader)
 				fmt.Printf("Hash table expire: %d\n", hashTableExpire)
+			} else {
+				reader.UnreadByte()
 			}
-		} else if b == 0xFF {
-			break
-		} else {
+		case 0xFF:
+			return nil
+		case 0xFC, 0xFD:
+			if b == 0xFC { // 毫秒（8 字节）
+				err := binary.Read(reader, binary.LittleEndian, &expireTime)
+				if err != nil {
+					return fmt.Errorf("failed to read expire time: %w", err)
+				}
+			} else if b == 0xFD { // 秒（4 字节）
+				var expireSec int32
+				err := binary.Read(reader, binary.LittleEndian, &expireSec)
+				if err != nil {
+					return fmt.Errorf("failed to read expire time: %w", err)
+				}
+				expireTime = int64(expireSec) * 1000
+			}
+			fmt.Printf("Expire time: %d\n", expireTime)
+		default:
+			fmt.Printf("default: 0x%X\n", b)
+			// reader.UnreadByte()
 			// 读取键值对
 			key, err := readStringEncoded(reader)
 			fmt.Printf("Key read: %s\n", key)
@@ -519,14 +531,18 @@ func loadRDBFile() error {
 
 			// 存储键值对
 			mu.Lock()
-			kvStore[key] = entry{value: value, expiration: 0}
+			kvStore[key] = entry{value: value, expiration: expireTime}
 			mu.Unlock()
-
+			expireTime = 0
 		}
 	}
-	return nil
 }
 
 // docker run --rm -it redis redis-cli -h host.docker.internal -p 6379
 // data\dump.rdb
 // go run app/server.go --dir data --dbfilename dump.rdb;
+
+// docker run --name myredis -d redis
+// docker exec -it myredis redis-cli
+// docker exec -it myredis sh -c "ls /data"
+// docker cp myredis:/data/dump.rdb .
