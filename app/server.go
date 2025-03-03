@@ -297,8 +297,10 @@ func processCommand(messages []string) CommandResult {
 		streamKey := messages[1]
 		entryID := messages[2]
 		// Validation
-		if !strings.Contains(entryID, "-") {
+		if !strings.Contains(entryID, "-") && entryID != "*" {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		} else if entryID == "*" {
+			entryID = fmt.Sprintf("%d-%d", time.Now().UnixNano()/1e6, 0)
 		}
 		parts := strings.Split(entryID, "-")
 		if len(parts) != 2 {
