@@ -249,6 +249,24 @@ func processCommand(messages []string) CommandResult {
 			kvStore[key] = entry{value: "1", expiration: int64(0)}
 		}
 		return CommandResult{Type: ":", Value: kvStore[key].value}
+	case "TYPE":
+		if len(messages) != 2 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'type' command"}
+		}
+		key := messages[1]
+		mu.Lock()
+		defer mu.Unlock()
+		entry, ok := kvStore[key]
+		if ok && entry.expiration > 0 && entry.expiration < time.Now().UnixMilli() {
+			delete(kvStore, key)
+			ok = false
+		}
+		if !ok {
+			// 响应类型是"+"，这表示RESP简单字符串
+			return CommandResult{Type: "+", Value: "none"}
+		} else {
+			return CommandResult{Type: "+", Value: "string"}
+		}
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
 }
