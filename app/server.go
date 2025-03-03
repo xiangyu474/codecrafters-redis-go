@@ -328,8 +328,11 @@ func processCommand(messages []string) CommandResult {
 			lastParts := strings.Split(lastEntry.id, "-")
 			lastMsTime, _ := strconv.ParseInt(lastParts[0], 10, 64)
 			lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
-			if autoSeqNumFlag {
+			if autoSeqNumFlag && msTime == lastMsTime {
 				seqNum = lastSeqNum + 1
+				entryID = fmt.Sprintf("%d-%d", msTime, seqNum)
+			} else if autoSeqNumFlag && msTime > lastMsTime {
+				seqNum = 0
 				entryID = fmt.Sprintf("%d-%d", msTime, seqNum)
 			}
 			if msTime < lastMsTime || (msTime == lastMsTime && seqNum <= lastSeqNum) {
