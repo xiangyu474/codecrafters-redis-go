@@ -313,9 +313,7 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
 		} else if parts[1] == "*" {
 			autoSeqNumFlag = true
-		}
-		if msTime == 0 && seqNum == 0 {
-			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
+			fmt.Print("autoSeqNumFlag: ", autoSeqNumFlag)
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -337,6 +335,10 @@ func processCommand(messages []string) CommandResult {
 			}
 		} else if !exists {
 			s = stream{entries: make([]streamEntry, 0)}
+		}
+
+		if msTime == 0 && seqNum == 0 {
+			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
 		}
 
 		// Create field-value pairs map
