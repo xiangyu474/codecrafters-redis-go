@@ -289,7 +289,7 @@ func processCommand(messages []string) CommandResult {
 		// 	return CommandResult{Type: "+", Value: "string"}
 		// }
 	case "XADD":
-		if len(messages) < 4 || len(messages)%2 = 0 {
+		if len(messages) < 4 || len(messages)%2 == 0 {
 			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'xadd' command"}
 		}
 		streamKey := messages[1]
