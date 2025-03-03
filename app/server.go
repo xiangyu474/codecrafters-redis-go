@@ -325,7 +325,10 @@ func processCommand(messages []string) CommandResult {
 			lastMsTime, _ := strconv.ParseInt(lastParts[0], 10, 64)
 			lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
 			if msTime < lastMsTime || (msTime == lastMsTime && seqNum <= lastSeqNum) {
-				return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+				return CommandResult{
+					Type:  "-",
+					Value: "ERR The ID specified in XADD is equal or smaller than the target stream top item",
+				}
 			}
 		} else if !exists {
 			s = stream{entries: make([]streamEntry, 0)}
