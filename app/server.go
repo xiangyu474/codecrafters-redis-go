@@ -289,6 +289,8 @@ func processCommand(messages []string) CommandResult {
 		// 	return CommandResult{Type: "+", Value: "string"}
 		// }
 	case "XADD":
+		// autoSeqNumFlag初始值设为false
+		autoSeqNumFlag := false
 		if len(messages) < 4 || len(messages)%2 == 0 {
 			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'xadd' command"}
 		}
@@ -298,7 +300,6 @@ func processCommand(messages []string) CommandResult {
 		if !strings.Contains(entryID, "-") {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
 		}
-
 		parts := strings.Split(entryID, "-")
 		if len(parts) != 2 {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
@@ -308,10 +309,11 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
 		}
 		seqNum, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil {
+		if err != nil && parts[1] != "*" {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		} else if parts[1] == "*" {
+			autoSeqNumFlag = true
 		}
-
 		if msTime == 0 && seqNum == 0 {
 			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
 		}
@@ -324,6 +326,9 @@ func processCommand(messages []string) CommandResult {
 			lastParts := strings.Split(lastEntry.id, "-")
 			lastMsTime, _ := strconv.ParseInt(lastParts[0], 10, 64)
 			lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
+			if autoSeqNumFlag {
+				seqNum = lastSeqNum + 1
+			}
 			if msTime < lastMsTime || (msTime == lastMsTime && seqNum <= lastSeqNum) {
 				return CommandResult{
 					Type:  "-",
