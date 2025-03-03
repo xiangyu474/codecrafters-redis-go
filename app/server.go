@@ -26,10 +26,23 @@ type config struct {
 	dbfilename string
 }
 
+type streamEntry struct {
+	id     string
+	values map[string]string
+}
+
+type stream struct {
+	entries []streamEntry
+}
+
 var (
-	kvStore = make(map[string]entry)
-	mu      sync.Mutex
-	cfg     = config{
+	// 	map[string]entry defines a map type with:
+	// string as the key type
+	// entry (a custom struct defined in the code) as the value type
+	kvStore     = make(map[string]entry)
+	streamStore = make(map[string]stream)
+	mu          sync.Mutex
+	cfg         = config{
 		dir:        "/tmp",
 		dbfilename: "dump.rdb",
 	}
@@ -261,12 +274,47 @@ func processCommand(messages []string) CommandResult {
 			delete(kvStore, key)
 			ok = false
 		}
-		if !ok {
-			// 响应类型是"+"，这表示RESP简单字符串
-			return CommandResult{Type: "+", Value: "none"}
-		} else {
+		if ok {
 			return CommandResult{Type: "+", Value: "string"}
 		}
+		_, streamExists := streamStore[key]
+		if streamExists {
+			return CommandResult{Type: "+", Value: "stream"}
+		}
+		return CommandResult{Type: "+", Value: "none"}
+		// if !ok {
+		// 	// 响应类型是"+"，这表示RESP简单字符串
+		// 	return CommandResult{Type: "+", Value: "none"}
+		// } else {
+		// 	return CommandResult{Type: "+", Value: "string"}
+		// }
+	case "XADD":
+		if len(messages) < 4 || len(messages)%2 != 0 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'xadd' command"}
+		}
+		streamKey := messages[1]
+		entryID := messages[2]
+
+		if !strings.Contains(entryID, "-") {
+			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		}
+
+		fieldValues := make(map[string]string)
+		for i := 3; i < len(messages); i += 2 {
+			field := messages[i]
+			value := messages[i+1]
+			fieldValues[field] = value
+		}
+		entry := streamEntry{id: entryID, values: fieldValues}
+		mu.Lock()
+		defer mu.Unlock()
+		s, exists := streamStore[streamKey]
+		if !exists {
+			s = stream{entries: make([]streamEntry, 0)}
+		}
+		s.entries = append(s.entries, entry)
+		streamStore[streamKey] = s
+		return CommandResult{Type: "$", Value: entryID}
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
 }
