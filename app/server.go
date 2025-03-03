@@ -327,6 +327,9 @@ func processCommand(messages []string) CommandResult {
 			if autoSeqNumFlag {
 				seqNum = lastSeqNum + 1
 			}
+			if msTime == 0 && seqNum == 0 {
+				return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
+			}
 			if msTime < lastMsTime || (msTime == lastMsTime && seqNum <= lastSeqNum) {
 				return CommandResult{
 					Type:  "-",
@@ -335,10 +338,6 @@ func processCommand(messages []string) CommandResult {
 			}
 		} else if !exists {
 			s = stream{entries: make([]streamEntry, 0)}
-		}
-
-		if msTime == 0 && seqNum == 0 {
-			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
 		}
 
 		// Create field-value pairs map
