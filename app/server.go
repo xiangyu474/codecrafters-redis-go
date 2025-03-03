@@ -294,11 +294,44 @@ func processCommand(messages []string) CommandResult {
 		}
 		streamKey := messages[1]
 		entryID := messages[2]
-
+		// Validation
 		if !strings.Contains(entryID, "-") {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
 		}
 
+		parts := strings.Split(entryID, "-")
+		if len(parts) != 2 {
+			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		}
+		msTime, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		}
+		seqNum, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		}
+
+		if msTime == 0 && seqNum == 0 {
+			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		// 因为要修改streamStore，所以需要加锁
+		s, exists := streamStore[streamKey]
+		if exists && len(s.entries) > 0 {
+			lastEntry := s.entries[len(s.entries)-1]
+			lastParts := strings.Split(lastEntry.id, "-")
+			lastMsTime, _ := strconv.ParseInt(lastParts[0], 10, 64)
+			lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
+			if msTime < lastMsTime || (msTime == lastMsTime && seqNum <= lastSeqNum) {
+				return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
+			}
+		} else if !exists {
+			s = stream{entries: make([]streamEntry, 0)}
+		}
+
+		// Create field-value pairs map
 		fieldValues := make(map[string]string)
 		for i := 3; i < len(messages); i += 2 {
 			field := messages[i]
@@ -306,12 +339,6 @@ func processCommand(messages []string) CommandResult {
 			fieldValues[field] = value
 		}
 		entry := streamEntry{id: entryID, values: fieldValues}
-		mu.Lock()
-		defer mu.Unlock()
-		s, exists := streamStore[streamKey]
-		if !exists {
-			s = stream{entries: make([]streamEntry, 0)}
-		}
 		s.entries = append(s.entries, entry)
 		streamStore[streamKey] = s
 		return CommandResult{Type: "$", Value: entryID}
