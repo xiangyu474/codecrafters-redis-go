@@ -326,6 +326,7 @@ func processCommand(messages []string) CommandResult {
 			lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
 			if autoSeqNumFlag {
 				seqNum = lastSeqNum + 1
+				entryID = fmt.Sprintf("%d-%d", msTime, seqNum)
 			}
 			if msTime == 0 && seqNum == 0 {
 				return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
