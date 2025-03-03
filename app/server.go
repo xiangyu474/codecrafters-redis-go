@@ -311,9 +311,13 @@ func processCommand(messages []string) CommandResult {
 		seqNum, err := strconv.ParseInt(parts[1], 10, 64)
 		if err != nil && parts[1] != "*" {
 			return CommandResult{Type: "-", Value: "ERR invalid stream ID"}
-		} else if parts[1] == "*" {
+		}
+		if parts[1] == "*" {
 			autoSeqNumFlag = true
 			fmt.Print("autoSeqNumFlag: ", autoSeqNumFlag)
+		}
+		if !autoSeqNumFlag && msTime == 0 && seqNum == 0 {
+			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -328,9 +332,6 @@ func processCommand(messages []string) CommandResult {
 				seqNum = lastSeqNum + 1
 				entryID = fmt.Sprintf("%d-%d", msTime, seqNum)
 			}
-			if msTime == 0 && seqNum == 0 {
-				return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
-			}
 			if msTime < lastMsTime || (msTime == lastMsTime && seqNum <= lastSeqNum) {
 				return CommandResult{
 					Type:  "-",
@@ -340,7 +341,11 @@ func processCommand(messages []string) CommandResult {
 		} else if !exists {
 			s = stream{entries: make([]streamEntry, 0)}
 			if autoSeqNumFlag {
-				seqNum = 0
+				if msTime == 0 {
+					seqNum = 1
+				} else {
+					seqNum = 0
+				}
 				entryID = fmt.Sprintf("%d-%d", msTime, seqNum)
 			}
 		}
