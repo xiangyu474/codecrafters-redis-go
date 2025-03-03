@@ -339,6 +339,10 @@ func processCommand(messages []string) CommandResult {
 			}
 		} else if !exists {
 			s = stream{entries: make([]streamEntry, 0)}
+			if autoSeqNumFlag {
+				seqNum = 0
+				entryID = fmt.Sprintf("%d-%d", msTime, seqNum)
+			}
 		}
 
 		// Create field-value pairs map
