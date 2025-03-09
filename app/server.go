@@ -185,6 +185,7 @@ func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
 			if len(window) == 0 {
 				noData = true
 			} else {
+				noData = false
 				// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
 				streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
 				entriesResp := fmt.Sprintf("*%d\r\n", len(window))
