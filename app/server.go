@@ -500,7 +500,8 @@ func processCommand(messages []string) CommandResult {
 			deadLine := time.Now().Add(time.Duration(blockMillis) * time.Millisecond)
 			for {
 				if time.Now().After(deadLine) {
-					return CommandResult{Type: "$", Value: "-1"}
+					fmt.Printf("Time out\n")
+					return CommandResult{Type: "$", Value: ""}
 				}
 				commonRes := helperXREAD(messages, 4, keyNum)
 				fmt.Println("commonRes: ", commonRes.Value)
