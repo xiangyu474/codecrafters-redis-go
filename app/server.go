@@ -366,6 +366,63 @@ func processCommand(messages []string) CommandResult {
 		s.entries = append(s.entries, entry)
 		streamStore[streamKey] = s
 		return CommandResult{Type: "$", Value: entryID}
+	case "XRANGE":
+		if len(messages) < 3 || len(messages) > 5 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'xrange' command"}
+		}
+		streamKey := messages[1]
+		start := messages[2]
+		end := messages[3]
+		if !strings.Contains(start, "-") {
+			start += "-0"
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		s, exists := streamStore[streamKey]
+		if !exists || len(s.entries) == 0 {
+			return CommandResult{Type: "*", Value: "0"}
+		} else {
+			lastEntry := s.entries[len(s.entries)-1]
+			// lastParts := strings.Split(lastEntry.id, "-")
+			// lastMsTime, _ := strconv.ParseInt(lastParts[0], 10, 64)
+			// lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
+			if !strings.Contains(end, "-") {
+				end = lastEntry.id
+			}
+			startParts := strings.Split(start, "-")
+			endParts := strings.Split(end, "-")
+			var window []streamEntry
+			for _, entry := range s.entries {
+				entryParts := strings.Split(entry.id, "-")
+				entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
+				entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
+				startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
+				startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
+				endMsTime, _ := strconv.ParseInt(endParts[0], 10, 64)
+				endSeqNum, _ := strconv.ParseInt(endParts[1], 10, 64)
+				if entryMsTime >= startMsTime && entrySeqNum >= startSeqNum && entryMsTime <= endMsTime && entrySeqNum <= endSeqNum {
+					window = append(window, entry)
+				}
+			}
+			resp := fmt.Sprintf("%d\r\n", len(window))
+			for _, entry := range window {
+				// Start building the inner array: [entry_id, [field-value pairs]]
+				// First element: entry id
+				inner := "*2\r\n"
+				inner += fmt.Sprintf("$%d\r\n%s\r\n", len(entry.id), entry.id)
+				// Second element: field-value pairs
+				// Count the total items in the inner field array = number of pairs *2
+				fieldCount := len(entry.values) * 2
+				fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
+				for field, value := range entry.values {
+					fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+				}
+				inner += fieldArr
+				resp += inner
+			}
+			return CommandResult{Type: "*", Value: resp}
+		}
+
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
 }
