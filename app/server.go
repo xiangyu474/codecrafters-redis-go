@@ -182,24 +182,26 @@ func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
 					window = append(window, entry)
 				}
 			}
-		} else {
-			noData = true
-		}
-		// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
-		streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
-		entriesResp := fmt.Sprintf("*%d\r\n", len(window))
-		for _, entry := range window {
-			entryResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
-			fieldCount := len(entry.values) * 2
-			fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
-			for field, value := range entry.values {
-				fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+			if len(window) == 0 {
+				noData = true
+			} else {
+				// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
+				streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
+				entriesResp := fmt.Sprintf("*%d\r\n", len(window))
+				for _, entry := range window {
+					entryResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
+					fieldCount := len(entry.values) * 2
+					fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
+					for field, value := range entry.values {
+						fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+					}
+					entryResp += fieldArr
+					entriesResp += entryResp
+				}
+				streamResp += entriesResp
+				respArr += streamResp
 			}
-			entryResp += fieldArr
-			entriesResp += entryResp
 		}
-		streamResp += entriesResp
-		respArr += streamResp
 	}
 	if noData {
 		return CommandResult{Type: "*", Value: "0"}
