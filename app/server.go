@@ -163,13 +163,13 @@ func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
 	mu.Lock()
 	defer mu.Unlock()
 	respArr := ""
+	noData := false
 	for i, streamKey := range streamKeys {
 		start := startIDs[i]
 		s, exists := streamStore[streamKey]
 		var window []streamEntry
-		if !exists || len(s.entries) == 0 {
-			return CommandResult{Type: "*", Value: "0"}
-		} else {
+		if exists && len(s.entries) != 0 {
+			noData = false
 			startParts := strings.Split(start, "-")
 			startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
 			startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
@@ -182,6 +182,8 @@ func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
 					window = append(window, entry)
 				}
 			}
+		} else {
+			noData = true
 		}
 		// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
 		streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
@@ -199,8 +201,12 @@ func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
 		streamResp += entriesResp
 		respArr += streamResp
 	}
-	finalResp := fmt.Sprintf("%d\r\n", keyNum) + respArr
-	return CommandResult{Type: "*", Value: finalResp}
+	if noData {
+		return CommandResult{Type: "*", Value: "0"}
+	} else {
+		finalResp := fmt.Sprintf("%d\r\n", keyNum) + respArr
+		return CommandResult{Type: "*", Value: finalResp}
+	}
 }
 
 func processCommand(messages []string) CommandResult {
@@ -494,6 +500,7 @@ func processCommand(messages []string) CommandResult {
 					return CommandResult{Type: "$", Value: "-1"}
 				}
 				commonRes := helperXREAD(messages, 4, keyNum)
+				fmt.Println("commonRes: ", commonRes.Value)
 				if commonRes.Value != "0" {
 					return commonRes
 				}
