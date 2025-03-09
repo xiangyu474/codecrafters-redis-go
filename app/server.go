@@ -426,43 +426,52 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "*", Value: resp}
 		}
 	case "XREAD":
-		if len(messages) < 4 {
-			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'xread' command"}
-		}
-		streamKey := messages[2]
-		start := messages[3]
-		mu.Lock()
-		defer mu.Unlock()
-		s, exists := streamStore[streamKey]
-		if !exists || len(s.entries) == 0 {
-			return CommandResult{Type: "*", Value: "0"}
-		} else {
-			startParts := strings.Split(start, "-")
-			var window []streamEntry
-			for _, entry := range s.entries {
-				entryParts := strings.Split(entry.id, "-")
-				entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
-				entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
-				startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
-				startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
-				//
-				if (entryMsTime > startMsTime) || (entryMsTime == startMsTime && entrySeqNum > startSeqNum) {
-					window = append(window, entry)
+		if len(messages) > 3 && strings.ToLower(messages[1]) == "streams" {
+			n := (len(messages) - 2) / 2
+			streamKeys := messages[2 : 2+n]
+			startIDs := messages[2+n:]
+
+			mu.Lock()
+			defer mu.Unlock()
+			respArr := ""
+			for i, streamKey := range streamKeys {
+				start := startIDs[i]
+				s, exists := streamStore[streamKey]
+				var window []streamEntry
+				if !exists || len(s.entries) == 0 {
+					return CommandResult{Type: "*", Value: "0"}
+				} else {
+					startParts := strings.Split(start, "-")
+					startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
+					startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
+					// var window []streamEntry
+					for _, entry := range s.entries {
+						entryParts := strings.Split(entry.id, "-")
+						entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
+						entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
+						if (entryMsTime > startMsTime) || (entryMsTime == startMsTime && entrySeqNum > startSeqNum) {
+							window = append(window, entry)
+						}
+					}
 				}
-			}
-			resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
-			for _, entry := range window {
-				inner := "*2\r\n"
-				inner += fmt.Sprintf("$%d\r\n%s\r\n", len(entry.id), entry.id)
-				fieldCount := len(entry.values) * 2
-				fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
-				for field, value := range entry.values {
-					fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+				// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
+				streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
+				entriesResp := fmt.Sprintf("*%d\r\n", len(window))
+				for _, entry := range window {
+					entryResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
+					fieldCount := len(entry.values) * 2
+					fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
+					for field, value := range entry.values {
+						fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+					}
+					entryResp += fieldArr
+					entriesResp += entryResp
 				}
-				inner += fieldArr
-				resp += inner
+				streamResp += entriesResp
+				respArr += streamResp
 			}
-			return CommandResult{Type: "*", Value: resp}
+			finalResp := fmt.Sprintf("%d\r\n", n) + respArr
+			return CommandResult{Type: "*", Value: finalResp}
 		}
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
