@@ -316,7 +316,7 @@ func processCommand(messages []string) CommandResult {
 		}
 		if parts[1] == "*" {
 			autoSeqNumFlag = true
-			fmt.Print("autoSeqNumFlag: ", autoSeqNumFlag)
+			fmt.Println("autoSeqNumFlag: ", autoSeqNumFlag)
 		}
 		if !autoSeqNumFlag && msTime == 0 && seqNum == 0 {
 			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
@@ -375,6 +375,9 @@ func processCommand(messages []string) CommandResult {
 		end := messages[3]
 		if !strings.Contains(start, "-") {
 			start += "-0"
+		} else if start == "-" {
+			//其实这里不转换也可以，因为后面会把start和end转换为entry的id，如果start是"-"，会被解析成0
+			start = "0-0"
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -383,9 +386,6 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "*", Value: "0"}
 		} else {
 			lastEntry := s.entries[len(s.entries)-1]
-			// lastParts := strings.Split(lastEntry.id, "-")
-			// lastMsTime, _ := strconv.ParseInt(lastParts[0], 10, 64)
-			// lastSeqNum, _ := strconv.ParseInt(lastParts[1], 10, 64)
 			if !strings.Contains(end, "-") {
 				end = lastEntry.id
 			}
@@ -397,7 +397,9 @@ func processCommand(messages []string) CommandResult {
 				entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
 				entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
 				startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
+				// fmt.Println(startMsTime) //空值会被解析为0
 				startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
+				// fmt.Println(startSeqNum) //空值会被解析为0
 				endMsTime, _ := strconv.ParseInt(endParts[0], 10, 64)
 				endSeqNum, _ := strconv.ParseInt(endParts[1], 10, 64)
 				if entryMsTime >= startMsTime && entrySeqNum >= startSeqNum && entryMsTime <= endMsTime && entrySeqNum <= endSeqNum {
