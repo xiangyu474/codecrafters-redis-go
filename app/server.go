@@ -155,6 +155,54 @@ func writeRESP(connection net.Conn, result CommandResult) {
 	}
 }
 
+func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
+	// n := (len(messages) - 2) / 2
+	streamKeys := messages[startIdx : startIdx+keyNum]
+	startIDs := messages[startIdx+keyNum:]
+
+	mu.Lock()
+	defer mu.Unlock()
+	respArr := ""
+	for i, streamKey := range streamKeys {
+		start := startIDs[i]
+		s, exists := streamStore[streamKey]
+		var window []streamEntry
+		if !exists || len(s.entries) == 0 {
+			return CommandResult{Type: "*", Value: "0"}
+		} else {
+			startParts := strings.Split(start, "-")
+			startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
+			startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
+			// var window []streamEntry
+			for _, entry := range s.entries {
+				entryParts := strings.Split(entry.id, "-")
+				entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
+				entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
+				if (entryMsTime > startMsTime) || (entryMsTime == startMsTime && entrySeqNum > startSeqNum) {
+					window = append(window, entry)
+				}
+			}
+		}
+		// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
+		streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
+		entriesResp := fmt.Sprintf("*%d\r\n", len(window))
+		for _, entry := range window {
+			entryResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
+			fieldCount := len(entry.values) * 2
+			fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
+			for field, value := range entry.values {
+				fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+			}
+			entryResp += fieldArr
+			entriesResp += entryResp
+		}
+		streamResp += entriesResp
+		respArr += streamResp
+	}
+	finalResp := fmt.Sprintf("%d\r\n", keyNum) + respArr
+	return CommandResult{Type: "*", Value: finalResp}
+}
+
 func processCommand(messages []string) CommandResult {
 	switch strings.ToUpper(messages[0]) {
 	case "CONFIG":
@@ -427,51 +475,30 @@ func processCommand(messages []string) CommandResult {
 		}
 	case "XREAD":
 		if len(messages) > 3 && strings.ToLower(messages[1]) == "streams" {
-			n := (len(messages) - 2) / 2
-			streamKeys := messages[2 : 2+n]
-			startIDs := messages[2+n:]
-
-			mu.Lock()
-			defer mu.Unlock()
-			respArr := ""
-			for i, streamKey := range streamKeys {
-				start := startIDs[i]
-				s, exists := streamStore[streamKey]
-				var window []streamEntry
-				if !exists || len(s.entries) == 0 {
-					return CommandResult{Type: "*", Value: "0"}
-				} else {
-					startParts := strings.Split(start, "-")
-					startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
-					startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
-					// var window []streamEntry
-					for _, entry := range s.entries {
-						entryParts := strings.Split(entry.id, "-")
-						entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
-						entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
-						if (entryMsTime > startMsTime) || (entryMsTime == startMsTime && entrySeqNum > startSeqNum) {
-							window = append(window, entry)
-						}
-					}
-				}
-				// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
-				streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
-				entriesResp := fmt.Sprintf("*%d\r\n", len(window))
-				for _, entry := range window {
-					entryResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
-					fieldCount := len(entry.values) * 2
-					fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
-					for field, value := range entry.values {
-						fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
-					}
-					entryResp += fieldArr
-					entriesResp += entryResp
-				}
-				streamResp += entriesResp
-				respArr += streamResp
+			startIdx := 2
+			keyNum := (len(messages) - 2) / 2
+			commonRes := helperXREAD(messages, startIdx, keyNum)
+			return commonRes
+		} else if len(messages) > 5 && strings.ToLower(messages[1]) == "block" {
+			blockMillis, err := strconv.Atoi(messages[2])
+			if err != nil {
+				return CommandResult{Type: "-", Value: "ERR invalid block time"}
 			}
-			finalResp := fmt.Sprintf("%d\r\n", n) + respArr
-			return CommandResult{Type: "*", Value: finalResp}
+			if strings.ToLower(messages[3]) != "streams" {
+				return CommandResult{Type: "-", Value: "ERR 'STREAMS' keyword missing in xread block command"}
+			}
+			keyNum := (len(messages) - 4) / 2
+			deadLine := time.Now().Add(time.Duration(blockMillis) * time.Millisecond)
+			for {
+				if time.Now().After(deadLine) {
+					return CommandResult{Type: "$", Value: "-1"}
+				}
+				commonRes := helperXREAD(messages, 4, keyNum)
+				if commonRes.Value != "0" {
+					return commonRes
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
