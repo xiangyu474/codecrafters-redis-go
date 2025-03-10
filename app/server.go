@@ -497,14 +497,19 @@ func processCommand(messages []string) CommandResult {
 				return CommandResult{Type: "-", Value: "ERR 'STREAMS' keyword missing in xread block command"}
 			}
 			keyNum := (len(messages) - 4) / 2
-			deadLine := time.Now().Add(time.Duration(blockMillis) * time.Millisecond)
+			var deadLine time.Time
+			if messages[2] != "0" {
+				deadLine = time.Now().Add(time.Duration(blockMillis) * time.Millisecond)
+			} else {
+				//如果blockMillis是0，那么就是一直阻塞
+				deadLine = time.Now().Add(time.Duration(365*24*5) * time.Hour)
+			}
 			for {
-				if time.Now().After(deadLine) {
+				if messages[2] != "0" && time.Now().After(deadLine) {
 					fmt.Printf("Time out\n")
 					return CommandResult{Type: "$", Value: ""}
 				}
 				commonRes := helperXREAD(messages, 4, keyNum)
-				fmt.Println("commonRes: ", commonRes.Value)
 				if commonRes.Value != "0" {
 					return commonRes
 				}
