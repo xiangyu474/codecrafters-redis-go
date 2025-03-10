@@ -497,6 +497,34 @@ func processCommand(messages []string) CommandResult {
 				return CommandResult{Type: "-", Value: "ERR 'STREAMS' keyword missing in xread block command"}
 			}
 			keyNum := (len(messages) - 4) / 2
+			streamKeys := messages[4 : 4+keyNum]
+			startIDs := messages[4+keyNum:]
+			copyMsgFlag := false
+			// Check if the start ID is "$"
+			mu.Lock()
+			for i, streamKey := range streamKeys {
+				if startIDs[i] == "$" {
+					s, exists := streamStore[streamKey]
+					if exists && len(s.entries) > 0 {
+						lastEntry := s.entries[len(s.entries)-1]
+						startIDs[i] = lastEntry.id
+						copyMsgFlag = true
+					}
+				}
+			}
+			mu.Unlock()
+
+			blockMessages := make([]string, len(messages))
+			copy(blockMessages, messages)
+
+			if copyMsgFlag {
+				// blockMessages = make([]string, len(messages))
+				// copy(blockMessages, messages)
+				for i := 0; i < keyNum; i++ {
+					blockMessages[4+keyNum+i] = startIDs[i]
+				}
+			}
+
 			var deadLine time.Time
 			if messages[2] != "0" {
 				deadLine = time.Now().Add(time.Duration(blockMillis) * time.Millisecond)
@@ -509,7 +537,9 @@ func processCommand(messages []string) CommandResult {
 					fmt.Printf("Time out\n")
 					return CommandResult{Type: "$", Value: ""}
 				}
-				commonRes := helperXREAD(messages, 4, keyNum)
+
+				commonRes := helperXREAD(blockMessages, 4, keyNum)
+
 				if commonRes.Value != "0" {
 					return commonRes
 				}
