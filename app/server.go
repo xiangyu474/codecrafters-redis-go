@@ -86,6 +86,14 @@ func main() {
 	fmt.Printf("dir: %s, dbfilename: %s, port: %d\r\n", cfg.dir, cfg.dbfilename, *port)
 	if cfg.replica != "" {
 		fmt.Printf("replica: %s\r\n", cfg.replica)
+		parts := strings.Split(cfg.replica, " ")
+		if len(parts) != 2 {
+			fmt.Println("Invalid replica format. Expected <host> <port>")
+			os.Exit(1)
+		}
+		masterHost := parts[0]
+		masterPort := parts[1]
+		go connectToMaster(masterHost, masterPort)
 	}
 
 	// 3. Load the RDB file
@@ -904,6 +912,39 @@ func loadRDBFile() error {
 			expireTime = 0
 		}
 	}
+}
+
+// 由于 host 和 port 都是字符串类型，所以使用了简写形式，将 string 类型应用于两个参数。
+func connectToMaster(host, port string) {
+	masterAddr := fmt.Sprintf("%s:%s", host, port)
+	// 连接到主节点
+	conn, err := net.Dial("tcp", masterAddr)
+	if err != nil {
+		fmt.Printf("Error connecting to master: %v\n", err)
+		return
+	}
+	defer conn.Close()
+
+	fmt.Printf("Connected to master at %s\n", masterAddr)
+
+	//发送PING命令
+	pingCmd := "*1\r\n$4\r\nPING\r\n"
+	_, err = conn.Write([]byte(pingCmd))
+	if err != nil {
+		fmt.Printf("Error sending PING command: %v\n", err)
+		return
+	}
+
+	buf := make([]byte, 1024)
+	// 读取主节点的响应
+	n, err := conn.Read(buf)
+	if err != nil {
+		fmt.Printf("Error reading from master: %v\n", err)
+		return
+	}
+
+	response := string(buf[:n])
+	fmt.Printf("Received response from master: %s\n", response)
 }
 
 // docker run --rm -it redis redis-cli -h host.docker.internal -p 6379
