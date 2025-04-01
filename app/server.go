@@ -48,6 +48,8 @@ var (
 		dbfilename: "dump.rdb",
 		replica:    "",
 	}
+	masterReplID     = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+	masterReplOffset = 0
 )
 
 type CommandResult struct {
@@ -564,11 +566,14 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'info' command"}
 		}
 		if strings.ToLower(messages[1]) == "replication" {
+			var responseValue string
 			if cfg.replica == "" {
-				return CommandResult{Type: "$", Value: "role:master"}
+				responseValue = fmt.Sprintf("role:master\r\nmaster_replid:%s\r\nmaster_repl_offset:%d",
+					masterReplID, masterReplOffset)
 			} else {
-				return CommandResult{Type: "$", Value: "role:slave"}
+				responseValue = "role:slave"
 			}
+			return CommandResult{Type: "$", Value: responseValue}
 
 		}
 	}
