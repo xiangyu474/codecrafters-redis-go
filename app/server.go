@@ -550,6 +550,14 @@ func processCommand(messages []string) CommandResult {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
+	case "INFO":
+		if len(messages) != 2 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'info' command"}
+		}
+		if strings.ToLower(messages[1]) == "replication" {
+			return CommandResult{Type: "$", Value: "role:master"}
+
+		}
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
 }
