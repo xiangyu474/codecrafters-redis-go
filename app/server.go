@@ -24,6 +24,7 @@ type entry struct {
 type config struct {
 	dir        string
 	dbfilename string
+	replica    string
 }
 
 type streamEntry struct {
@@ -45,6 +46,7 @@ var (
 	cfg         = config{
 		dir:        "/tmp",
 		dbfilename: "dump.rdb",
+		replica:    "",
 	}
 )
 
@@ -66,6 +68,7 @@ func main() {
 	dir := flag.String("dir", "/tmp", "Redis data directory")
 	dbfilename := flag.String("dbfilename", "dump.rdb", "Redis data file name")
 	port := flag.Int("port", 6379, "Port to listen on")
+	replica := flag.String("replicaof", "", "Replica of master server")
 	flag.Parse()
 	// 2. Set the data directory and file name in the config struct
 	// *dir是指针指向的实际字符串值
@@ -75,7 +78,13 @@ func main() {
 	if *dbfilename != "" {
 		cfg.dbfilename = *dbfilename
 	}
+	if *replica != "" {
+		cfg.replica = *replica
+	}
 	fmt.Printf("dir: %s, dbfilename: %s, port: %d\r\n", cfg.dir, cfg.dbfilename, *port)
+	if cfg.replica != "" {
+		fmt.Printf("replica: %s\r\n", cfg.replica)
+	}
 
 	// 3. Load the RDB file
 	err := loadRDBFile()
@@ -555,7 +564,11 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'info' command"}
 		}
 		if strings.ToLower(messages[1]) == "replication" {
-			return CommandResult{Type: "$", Value: "role:master"}
+			if cfg.replica != "" {
+				return CommandResult{Type: "$", Value: "role:master"}
+			} else {
+				return CommandResult{Type: "$", Value: "role:slave"}
+			}
 
 		}
 	}
