@@ -62,17 +62,20 @@ func main() {
 	fmt.Println("Logs from your program will appear here!")
 
 	// 1. Parse command line arguments
+	// dir是指针本身，指向存储字符串值的内存地址
 	dir := flag.String("dir", "/tmp", "Redis data directory")
 	dbfilename := flag.String("dbfilename", "dump.rdb", "Redis data file name")
+	port := flag.Int("port", 6379, "Port to listen on")
 	flag.Parse()
 	// 2. Set the data directory and file name in the config struct
+	// *dir是指针指向的实际字符串值
 	if *dir != "" {
 		cfg.dir = *dir
 	}
 	if *dbfilename != "" {
 		cfg.dbfilename = *dbfilename
 	}
-	fmt.Printf("dir: %s, dbfilename: %s\r\n", cfg.dir, cfg.dbfilename)
+	fmt.Printf("dir: %s, dbfilename: %s, port: %d\r\n", cfg.dir, cfg.dbfilename, *port)
 
 	// 3. Load the RDB file
 	err := loadRDBFile()
@@ -80,12 +83,13 @@ func main() {
 		fmt.Println("Failed to load RDB file:", err)
 		os.Exit(1)
 	}
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
+	// Use the specified port value when creating the TCP listener
+	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *port))
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
-	fmt.Println("Listening on 6379")
+	fmt.Printf("Listening on port %d\n", *port)
 
 	for {
 		connection, err := l.Accept()
