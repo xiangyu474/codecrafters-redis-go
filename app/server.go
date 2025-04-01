@@ -159,6 +159,63 @@ func writeRESP(connection net.Conn, result CommandResult) {
 	}
 }
 
+func helperXREAD(messages []string, startIdx int, keyNum int) CommandResult {
+	// n := (len(messages) - 2) / 2
+	streamKeys := messages[startIdx : startIdx+keyNum]
+	startIDs := messages[startIdx+keyNum:]
+
+	mu.Lock()
+	defer mu.Unlock()
+	respArr := ""
+	noData := false
+	for i, streamKey := range streamKeys {
+		start := startIDs[i]
+		s, exists := streamStore[streamKey]
+		var window []streamEntry
+		if exists && len(s.entries) != 0 {
+			noData = false
+			startParts := strings.Split(start, "-")
+			startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
+			startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
+			// var window []streamEntry
+			for _, entry := range s.entries {
+				entryParts := strings.Split(entry.id, "-")
+				entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
+				entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
+				if (entryMsTime > startMsTime) || (entryMsTime == startMsTime && entrySeqNum > startSeqNum) {
+					window = append(window, entry)
+				}
+			}
+			if len(window) == 0 {
+				noData = true
+			} else {
+				noData = false
+				// resp := fmt.Sprintf("1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(window))
+				streamResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(streamKey), streamKey)
+				entriesResp := fmt.Sprintf("*%d\r\n", len(window))
+				for _, entry := range window {
+					entryResp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
+					fieldCount := len(entry.values) * 2
+					fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
+					for field, value := range entry.values {
+						fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+					}
+					entryResp += fieldArr
+					entriesResp += entryResp
+				}
+				streamResp += entriesResp
+				respArr += streamResp
+			}
+		}
+	}
+	if noData {
+		return CommandResult{Type: "*", Value: "0"}
+	} else {
+		finalResp := fmt.Sprintf("%d\r\n", keyNum) + respArr
+		return CommandResult{Type: "*", Value: finalResp}
+	}
+}
+
 func processCommand(messages []string) CommandResult {
 	switch strings.ToUpper(messages[0]) {
 	case "CONFIG":
@@ -320,7 +377,7 @@ func processCommand(messages []string) CommandResult {
 		}
 		if parts[1] == "*" {
 			autoSeqNumFlag = true
-			fmt.Print("autoSeqNumFlag: ", autoSeqNumFlag)
+			fmt.Println("autoSeqNumFlag: ", autoSeqNumFlag)
 		}
 		if !autoSeqNumFlag && msTime == 0 && seqNum == 0 {
 			return CommandResult{Type: "-", Value: "ERR The ID specified in XADD must be greater than 0-0"}
@@ -370,6 +427,129 @@ func processCommand(messages []string) CommandResult {
 		s.entries = append(s.entries, entry)
 		streamStore[streamKey] = s
 		return CommandResult{Type: "$", Value: entryID}
+	case "XRANGE":
+		if len(messages) < 3 || len(messages) > 5 {
+			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'xrange' command"}
+		}
+		streamKey := messages[1]
+		start := messages[2]
+		end := messages[3]
+		if !strings.Contains(start, "-") {
+			start += "-0"
+		} else if start == "-" {
+			//其实这里不转换也可以，因为后面会把start和end转换为entry的id，如果start是"-"，会被解析成0
+			start = "0-0"
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		s, exists := streamStore[streamKey]
+		if !exists || len(s.entries) == 0 {
+			return CommandResult{Type: "*", Value: "0"}
+		} else {
+			lastEntry := s.entries[len(s.entries)-1]
+			if !strings.Contains(end, "-") {
+				//这也涵盖了end == "+"的情况
+				end = lastEntry.id
+			}
+			startParts := strings.Split(start, "-")
+			endParts := strings.Split(end, "-")
+			var window []streamEntry
+			for _, entry := range s.entries {
+				entryParts := strings.Split(entry.id, "-")
+				entryMsTime, _ := strconv.ParseInt(entryParts[0], 10, 64)
+				entrySeqNum, _ := strconv.ParseInt(entryParts[1], 10, 64)
+				startMsTime, _ := strconv.ParseInt(startParts[0], 10, 64)
+				// fmt.Println(startMsTime) //空值会被解析为0
+				startSeqNum, _ := strconv.ParseInt(startParts[1], 10, 64)
+				// fmt.Println(startSeqNum) //空值会被解析为0
+				endMsTime, _ := strconv.ParseInt(endParts[0], 10, 64)
+				endSeqNum, _ := strconv.ParseInt(endParts[1], 10, 64)
+				if entryMsTime >= startMsTime && entrySeqNum >= startSeqNum && entryMsTime <= endMsTime && entrySeqNum <= endSeqNum {
+					window = append(window, entry)
+				}
+			}
+			resp := fmt.Sprintf("%d\r\n", len(window))
+			for _, entry := range window {
+				// Start building the inner array: [entry_id, [field-value pairs]]
+				// First element: entry id
+				inner := "*2\r\n"
+				inner += fmt.Sprintf("$%d\r\n%s\r\n", len(entry.id), entry.id)
+				// Second element: field-value pairs
+				// Count the total items in the inner field array = number of pairs *2
+				fieldCount := len(entry.values) * 2
+				fieldArr := fmt.Sprintf("*%d\r\n", fieldCount)
+				for field, value := range entry.values {
+					fieldArr += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(field), field, len(value), value)
+				}
+				inner += fieldArr
+				resp += inner
+			}
+			return CommandResult{Type: "*", Value: resp}
+		}
+	case "XREAD":
+		if len(messages) > 3 && strings.ToLower(messages[1]) == "streams" {
+			startIdx := 2
+			keyNum := (len(messages) - 2) / 2
+			commonRes := helperXREAD(messages, startIdx, keyNum)
+			return commonRes
+		} else if len(messages) > 5 && strings.ToLower(messages[1]) == "block" {
+			blockMillis, err := strconv.Atoi(messages[2])
+			if err != nil {
+				return CommandResult{Type: "-", Value: "ERR invalid block time"}
+			}
+			if strings.ToLower(messages[3]) != "streams" {
+				return CommandResult{Type: "-", Value: "ERR 'STREAMS' keyword missing in xread block command"}
+			}
+			keyNum := (len(messages) - 4) / 2
+			streamKeys := messages[4 : 4+keyNum]
+			startIDs := messages[4+keyNum:]
+			copyMsgFlag := false
+			// Check if the start ID is "$"
+			mu.Lock()
+			for i, streamKey := range streamKeys {
+				if startIDs[i] == "$" {
+					s, exists := streamStore[streamKey]
+					if exists && len(s.entries) > 0 {
+						lastEntry := s.entries[len(s.entries)-1]
+						startIDs[i] = lastEntry.id
+						copyMsgFlag = true
+					}
+				}
+			}
+			mu.Unlock()
+
+			blockMessages := make([]string, len(messages))
+			copy(blockMessages, messages)
+
+			if copyMsgFlag {
+				// blockMessages = make([]string, len(messages))
+				// copy(blockMessages, messages)
+				for i := 0; i < keyNum; i++ {
+					blockMessages[4+keyNum+i] = startIDs[i]
+				}
+			}
+
+			var deadLine time.Time
+			if messages[2] != "0" {
+				deadLine = time.Now().Add(time.Duration(blockMillis) * time.Millisecond)
+			} else {
+				//如果blockMillis是0，那么就是一直阻塞
+				deadLine = time.Now().Add(time.Duration(365*24*5) * time.Hour)
+			}
+			for {
+				if messages[2] != "0" && time.Now().After(deadLine) {
+					fmt.Printf("Time out\n")
+					return CommandResult{Type: "$", Value: ""}
+				}
+
+				commonRes := helperXREAD(blockMessages, 4, keyNum)
+
+				if commonRes.Value != "0" {
+					return commonRes
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
 	}
 	return CommandResult{Type: "-", Value: "ERR unknown command"}
 }
