@@ -564,7 +564,7 @@ func processCommand(messages []string) CommandResult {
 			return CommandResult{Type: "-", Value: "ERR wrong number of arguments for 'info' command"}
 		}
 		if strings.ToLower(messages[1]) == "replication" {
-			if cfg.replica != "" {
+			if cfg.replica == "" {
 				return CommandResult{Type: "$", Value: "role:master"}
 			} else {
 				return CommandResult{Type: "$", Value: "role:slave"}
